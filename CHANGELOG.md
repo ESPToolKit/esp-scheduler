@@ -5,6 +5,9 @@ All notable changes to this project are documented in this file.
 The format follows Keep a Changelog and the project adheres to Semantic Versioning.
 
 ## [Unreleased]
+### Added
+- Expanded README with API map, cron recipes, and execution-mode guidance.
+- Added focused examples covering inline one-shot, pause/resume, custom cron fields, monthly triggers, and worker-based weekly/one-shot jobs.
 
 ## [0.1.0] - 2025-12-07
 ### Added

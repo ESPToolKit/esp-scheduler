@@ -58,54 +58,68 @@ void loop() {
 }
 ```
 
-## Core Types
-- `SchedulerJobMode`: `Inline` (callback runs inside `tick()`) or `WorkerTask` (dedicated FreeRTOS task via ESPWorker).
-- `SchedulerTaskConfig`: optional per-job task config (name, stack size, priority, core, PSRAM stack flag) used only in worker mode.
+## API quick map
+- `SchedulerJobMode`: `Inline` (runs inside `tick()`) or `WorkerTask` (dedicated FreeRTOS task via ESPWorker).
+- `SchedulerTaskConfig`: optional worker task config (name, stack size, priority, core, PSRAM stack flag).
 - `SchedulerCallback`: `using SchedulerCallback = void (*)(void* userData);`
 - `ScheduleField`: bitmask-backed allowed values for one cron field. Builders: `any()`, `only()`, `range()`, `every()`, `rangeEvery()`, `list()`.
-- `Schedule`: either a one-shot (`onceUtc`) or a cron-like pattern with helpers: `dailyAtLocal`, `weeklyAtLocal`, `monthlyOnDayLocal`, `custom`.
+- `Schedule`: one-shot (`onceUtc`) or cron-like via helpers: `dailyAtLocal`, `weeklyAtLocal`, `monthlyOnDayLocal`, `custom`.
 
-## API Overview
 ```cpp
-class ESPScheduler {
-public:
-    ESPScheduler(ESPDate& date, ESPWorker* worker = nullptr);
+ESPScheduler scheduler(date, &worker);              // worker optional; required for WorkerTask mode
+uint32_t id = scheduler.addJob(
+    Schedule::dailyAtLocal(7, 30),
+    SchedulerJobMode::Inline,
+    &myCallback,
+    nullptr);
 
-    uint32_t addJobOnceUtc(const DateTime& whenUtc,
-                           SchedulerJobMode mode,
-                           SchedulerCallback cb,
-                           void* userData = nullptr,
-                           const SchedulerTaskConfig* taskCfg = nullptr);
-
-    uint32_t addJob(const Schedule& schedule,
-                    SchedulerJobMode mode,
-                    SchedulerCallback cb,
-                    void* userData = nullptr,
-                    const SchedulerTaskConfig* taskCfg = nullptr);
-
-    bool cancelJob(uint32_t jobId);
-    bool pauseJob(uint32_t jobId);
-    bool resumeJob(uint32_t jobId);
-    void cancelAll();
-
-    void tick(const DateTime& nowUtc); // drive inline jobs with a known timestamp
-    void tick();                       // convenience: uses ESPDate::now()
-};
+scheduler.pauseJob(id);
+scheduler.resumeJob(id);
+scheduler.cancelJob(id);
 ```
 
+## Schedule recipes
+```cpp
+// One-shot absolute UTC
+Schedule once = Schedule::onceUtc(date.fromUtc(2025, 1, 1, 12, 0));
+
+// Daily 08:15 (local)
+Schedule daily = Schedule::dailyAtLocal(8, 15);
+
+// Weekdays at 18:30 (bitmask: 0=Sun, 1=Mon...)
+uint8_t weekdays = 0b0111110; // Mon..Fri
+Schedule weekly = Schedule::weeklyAtLocal(weekdays, 18, 30);
+
+// Monthly on the 1st at 09:00 (clamps 29/30/31 to valid)
+Schedule monthly = Schedule::monthlyOnDayLocal(1, 9, 0);
+
+// Custom cron-like: every 5 minutes between 9-17 on Mon/Wed/Fri
+int days[] = {1, 3, 5};
+Schedule custom = Schedule::custom(
+    ScheduleField::every(5),              // minute
+    ScheduleField::range(9, 17),          // hour
+    ScheduleField::any(),                 // day of month
+    ScheduleField::any(),                 // month
+    ScheduleField::list(days, 3));        // day of week
+```
+
+### Execution modes
+- **Inline**: call `tick()` periodically; callbacks run in the caller’s context. Works without ESPWorker.
+- **WorkerTask**: requires ESPWorker; each job gets its own FreeRTOS task that sleeps until due. Configure stacks/priority/affinity via `SchedulerTaskConfig`.
+
 ### Cron semantics
-- Resolution: minutes (seconds are always treated as zero).
-- Local time: matching uses local calendar components from ESPDate (TZ/DST aware).
-- `dayOfMonth` vs `dayOfWeek`: classic cron rule — if both are restricted, a match on either passes; if either is `any`, that field becomes non-blocking.
-- One-shots store absolute UTC times and run once.
+- Resolution: minutes (seconds always treated as zero).
+- Local time matching via ESPDate; honour your TZ/DST setup before scheduling.
+- `dayOfMonth` vs `dayOfWeek`: classic cron OR rule when both are restricted; either can satisfy the day check.
 
-### Inline vs worker jobs
-- Inline jobs live in a lightweight vector and are dispatched when `tick()` sees they are due.
-- Worker jobs spawn a dedicated FreeRTOS task through ESPWorker. Each task sleeps until the next execution, honours pause/cancel flags, and supports PSRAM stacks via `SchedulerTaskConfig::usePsramStack`.
-
-## Examples
-- `examples/inline_daily/inline_daily.ino` — simple inline scheduler tick loop.
-- `examples/worker_jobs/worker_jobs.ino` — worker-backed jobs with custom stack size and name.
+## Examples (one focus per sketch)
+- `examples/inline_daily/inline_daily.ino` — inline daily tick loop.
+- `examples/inline_one_shot/inline_one_shot.ino` — single UTC trigger inline.
+- `examples/inline_pause_resume/inline_pause_resume.ino` — pausing/resuming a repeating inline job.
+- `examples/worker_weekly/worker_weekly.ino` — weekly heavy job on its own task with custom stack/priority.
+- `examples/worker_one_shot/worker_one_shot.ino` — one-shot worker task using PSRAM stack.
+- `examples/custom_fields/custom_fields.ino` — custom cron fields (every N minutes, selected weekdays/hours).
+- `examples/monthly_on_day/monthly_on_day.ino` — monthly day-of-month trigger with clamping.
 
 ## Links
 - [ESPToolKit website](https://esptoolkitfrontend.onrender.com/)
