@@ -87,6 +87,7 @@ jobs:
         run: |
           set -e
           arduino-cli config init --overwrite
+          arduino-cli config set library.enable_unsafe_install true
           arduino-cli config add board_manager.additional_urls "${ESP32_PACKAGE_URL}"
           arduino-cli config dump
 
