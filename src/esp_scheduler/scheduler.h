@@ -75,7 +75,15 @@ struct JobInfo {
 
 class ESPScheduler {
 public:
+    // Default guard: block scheduling until at least 2020-01-01T00:00:00Z.
+    static constexpr int64_t kDefaultMinValidEpochSeconds = 1577836800;
+
     ESPScheduler(ESPDate& date, ESPWorker* worker = nullptr);
+
+    // Configure / inspect the minimum valid wall-clock time; scheduler idles until time >= min.
+    void setMinValidUnixSeconds(int64_t minEpochSeconds);
+    void setMinValidUtc(const DateTime& minUtc);
+    int64_t minValidUnixSeconds() const;
 
     uint32_t addJobOnceUtc(const DateTime& whenUtc,
                            SchedulerJobMode mode,
@@ -142,10 +150,12 @@ private:
     WorkerConfig makeWorkerConfig(const SchedulerTaskConfig* taskCfg) const;
     void cleanupInline();
     void cleanupWorkers();
+    bool clockValid(const DateTime& nowUtc) const;
 
     ESPDate& m_date;
     ESPWorker* m_worker;
     uint32_t m_nextId = 1;
+    int64_t m_minValidEpochSeconds = kDefaultMinValidEpochSeconds;
     std::vector<InlineJob> m_inlineJobs;
     std::vector<WorkerJob> m_workerJobs;
 };

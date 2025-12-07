@@ -157,6 +157,18 @@ Schedule Schedule::custom(const ScheduleField& minute,
 
 ESPScheduler::ESPScheduler(ESPDate& date, ESPWorker* worker) : m_date(date), m_worker(worker) {}
 
+void ESPScheduler::setMinValidUnixSeconds(int64_t minEpochSeconds) {
+    m_minValidEpochSeconds = minEpochSeconds;
+}
+
+void ESPScheduler::setMinValidUtc(const DateTime& minUtc) {
+    setMinValidUnixSeconds(minUtc.epochSeconds);
+}
+
+int64_t ESPScheduler::minValidUnixSeconds() const {
+    return m_minValidEpochSeconds;
+}
+
 uint32_t ESPScheduler::nextId() {
     if (m_nextId == 0) {
         m_nextId = 1;
@@ -333,6 +345,10 @@ void ESPScheduler::cancelAll() {
 void ESPScheduler::tick() { tick(m_date.now()); }
 
 void ESPScheduler::tick(const DateTime& nowUtc) {
+    if (!clockValid(nowUtc)) {
+        return;
+    }
+
     for (auto& job : m_inlineJobs) {
         if (job.finished || job.paused) {
             continue;
@@ -497,6 +513,10 @@ void ESPScheduler::runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx) {
     ESPDate& date = *ctx->date;
     while (!ctx->cancelRequested.load()) {
         DateTime now = date.now();
+        if (!clockValid(now)) {
+            vTaskDelay(pdMS_TO_TICKS(kWorkerSleepChunkSeconds * 1000));
+            continue;
+        }
         if (!ctx->hasNext) {
             if (ctx->schedule.isOneShot) {
                 ctx->nextRunUtc = ctx->schedule.onceAtUtc;
@@ -533,6 +553,10 @@ void ESPScheduler::runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx) {
         }
     }
     ctx->finished.store(true);
+}
+
+bool ESPScheduler::clockValid(const DateTime& nowUtc) const {
+    return nowUtc.epochSeconds >= m_minValidEpochSeconds;
 }
 
 WorkerConfig ESPScheduler::makeWorkerConfig(const SchedulerTaskConfig* taskCfg) const {

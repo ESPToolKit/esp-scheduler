@@ -94,8 +94,24 @@ static void test_get_job_info_reports_next_run() {
   TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, date.fromUtc(2025, 1, 1, 6, 0, 0)));
 }
 
+static void test_tick_waits_until_clock_valid() {
+  inlineHits = 0;
+  Schedule s = Schedule::dailyAtLocal(6, 0);
+  uint32_t id = scheduler.addJob(s, SchedulerJobMode::Inline, &inlineCallback, nullptr);
+  TEST_ASSERT_NOT_EQUAL(0u, id);
+
+  DateTime invalid = date.fromUtc(1970, 1, 1, 0, 0, 0);
+  scheduler.tick(invalid);
+  TEST_ASSERT_EQUAL(0, inlineHits);
+
+  DateTime valid = date.fromUtc(2025, 1, 1, 6, 0, 0);
+  scheduler.tick(valid);
+  TEST_ASSERT_EQUAL(1, inlineHits);
+}
+
 void setUp() {
   scheduler.cancelAll();
+  scheduler.setMinValidUnixSeconds(ESPScheduler::kDefaultMinValidEpochSeconds);
   inlineHits = 0;
 }
 
@@ -113,6 +129,7 @@ void setup() {
   RUN_TEST(test_dom_dow_or_logic_matches_either);
   RUN_TEST(test_inline_tick_runs_and_reschedules);
   RUN_TEST(test_get_job_info_reports_next_run);
+  RUN_TEST(test_tick_waits_until_clock_valid);
   UNITY_END();
 }
 

@@ -12,6 +12,7 @@ ESPScheduler is a C++17, class-based scheduler for ESP32 firmware that brings cr
 - **Inline or worker execution**: run callbacks inside `tick()` or on their own FreeRTOS task via ESPWorker (with PSRAM stack option).
 - **One-shot UTC triggers**: schedule absolute UTC times alongside recurring patterns.
 - **Calendar-aware**: respects classic cron `dayOfMonth` vs `dayOfWeek` logic and always operates in local time.
+- **Clock guard for unset RTC**: defaults to idling until the wall clock reaches 2020-01-01 UTC (configurable) so jobs do not replay from the 1970 epoch when SNTP syncs later.
 - **Class-based API**: everything hangs off an `ESPScheduler` instance; no global namespaces or macros.
 - **Arduino / ESP-IDF friendly**: C++17, metadata for PlatformIO/Arduino CLI, and examples/tests ready for CI.
 
@@ -43,6 +44,8 @@ void setup() {
     Serial.begin(115200);
     // Configure SNTP/time zone before scheduling so ESPDate reports valid local time.
     worker.init({ .maxWorkers = 4 });
+    // Optional: raise the minimum valid clock to block jobs until SNTP sets time.
+    scheduler.setMinValidUtc(date.fromUtc(2020, 1, 1, 0, 0, 0));
 
     // Run every weekday at 07:30 (local time) on a dedicated worker task
     uint8_t weekdaysMask = 0b0111110; // Mon..Fri
@@ -62,6 +65,7 @@ void loop() {
 - `SchedulerJobMode`: `Inline` (runs inside `tick()`) or `WorkerTask` (dedicated FreeRTOS task via ESPWorker).
 - `SchedulerTaskConfig`: optional worker task config (name, stack size, priority, core, PSRAM stack flag).
 - `SchedulerCallback`: `using SchedulerCallback = void (*)(void* userData);`
+- `setMinValidUnixSeconds` / `setMinValidUtc`: block all inline/worker jobs until the wall clock reaches this point (default: 2020-01-01 UTC).
 - `ScheduleField`: bitmask-backed allowed values for one cron field. Builders: `any()`, `only()`, `range()`, `every()`, `rangeEvery()`, `list()`.
 - `Schedule`: one-shot (`onceUtc`) or cron-like via helpers: `dailyAtLocal`, `weeklyAtLocal`, `monthlyOnDayLocal`, `custom`.
 - `JobInfo` / `getJobInfo(index, info)`: inspect active jobs (inline first, then worker), including enabled state, schedule copy, and next run (if known).
@@ -114,6 +118,7 @@ Schedule custom = Schedule::custom(
 - Resolution: minutes (seconds always treated as zero).
 - Local time matching via ESPDate; honour your TZ/DST setup before scheduling.
 - `dayOfMonth` vs `dayOfWeek`: classic cron OR rule when both are restricted; either can satisfy the day check.
+- Clock validity guard: inline and worker paths stay idle while `now()` is before `setMinValidUnixSeconds()` (default 2020-01-01 UTC). Set it to `0` if you explicitly want to allow pre-2000 times.
 
 ## Examples (one focus per sketch)
 - `examples/inline_daily/inline_daily.ino` — inline daily tick loop.
