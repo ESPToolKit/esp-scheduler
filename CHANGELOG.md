@@ -6,6 +6,15 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 
 ## [Unreleased]
 
+## [1.0.1] - 2025-12-07
+### Added
+- `JobInfo` inspector and `getJobInfo()` helper to enumerate active inline/worker jobs with their schedules and next run time.
+- `cleanup()` helper to purge finished inline/worker jobs when not driving the scheduler via `tick()`.
+
+### Changed
+- `Schedule::weeklyAtLocal()` now treats an empty weekday mask as “any day” instead of producing an empty field, and `ScheduleField::list()` documents that out-of-range values clear the field.
+- Worker jobs now track `nextRunUtc` inside their context to align with the inspector API.
+
 ## [1.0.0] - 2025-12-07
 ### Added
 - Expanded README with API map, cron recipes, and execution-mode guidance.
@@ -20,6 +29,7 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 - Examples for inline and worker-driven jobs, README and metadata for Arduino/PlatformIO/ESP-IDF.
 - CI + release workflows, issue/PR templates, and Unity smoke tests for cron matching.
 
-[Unreleased]: https://github.com/ESPToolKit/esp-scheduler/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ESPToolKit/esp-scheduler/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/ESPToolKit/esp-scheduler/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/ESPToolKit/esp-scheduler/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/ESPToolKit/esp-scheduler/releases/tag/v0.1.0

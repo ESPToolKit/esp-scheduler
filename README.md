@@ -64,6 +64,8 @@ void loop() {
 - `SchedulerCallback`: `using SchedulerCallback = void (*)(void* userData);`
 - `ScheduleField`: bitmask-backed allowed values for one cron field. Builders: `any()`, `only()`, `range()`, `every()`, `rangeEvery()`, `list()`.
 - `Schedule`: one-shot (`onceUtc`) or cron-like via helpers: `dailyAtLocal`, `weeklyAtLocal`, `monthlyOnDayLocal`, `custom`.
+- `JobInfo` / `getJobInfo(index, info)`: inspect active jobs (inline first, then worker), including enabled state, schedule copy, and next run (if known).
+- `cleanup()`: manually purge finished inline/worker jobs when you are not calling `tick()`.
 
 ```cpp
 ESPScheduler scheduler(date, &worker);              // worker optional; required for WorkerTask mode
@@ -106,6 +108,7 @@ Schedule custom = Schedule::custom(
 ### Execution modes
 - **Inline**: call `tick()` periodically; callbacks run in the caller’s context. Works without ESPWorker.
 - **WorkerTask**: requires ESPWorker; each job gets its own FreeRTOS task that sleeps until due. Configure stacks/priority/affinity via `SchedulerTaskConfig`.
+- Even if you only schedule `WorkerTask` jobs, call `tick()` or `cleanup()` occasionally so the scheduler can drop finished worker job metadata.
 
 ### Cron semantics
 - Resolution: minutes (seconds always treated as zero).

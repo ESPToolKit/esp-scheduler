@@ -117,7 +117,11 @@ Schedule Schedule::weeklyAtLocal(uint8_t dowMask, int hour, int minute) {
     s.minute = ScheduleField::only(minute);
     s.dayOfMonth = ScheduleField::any();
     s.month = ScheduleField::any();
-    s.dayOfWeek = ScheduleField::list(days, count);
+    if (count == 0) {
+        s.dayOfWeek = ScheduleField::any();
+    } else {
+        s.dayOfWeek = ScheduleField::list(days, count);
+    }
     return s;
 }
 
@@ -365,6 +369,67 @@ void ESPScheduler::tick(const DateTime& nowUtc) {
     cleanupWorkers();
 }
 
+void ESPScheduler::cleanup() {
+    cleanupInline();
+    cleanupWorkers();
+}
+
+bool ESPScheduler::getJobInfo(size_t index, JobInfo& out) const {
+    out = JobInfo{};
+    size_t current = 0;
+    auto fillNext = [this](const Schedule& schedule, bool hasNext, const DateTime& storedNext, DateTime& outNext) {
+        if (hasNext) {
+            outNext = storedNext;
+            return;
+        }
+        if (schedule.isOneShot) {
+            outNext = schedule.onceAtUtc;
+            return;
+        }
+        DateTime computed{};
+        if (computeNextOccurrence(schedule, m_date.now(), computed)) {
+            outNext = computed;
+        } else {
+            outNext = {};
+        }
+    };
+
+    for (const auto& job : m_inlineJobs) {
+        if (job.finished) {
+            continue;
+        }
+        if (current == index) {
+            out.id = job.id;
+            out.enabled = !job.paused;
+            out.mode = SchedulerJobMode::Inline;
+            out.schedule = job.schedule;
+            fillNext(job.schedule, job.hasNext, job.nextRunUtc, out.nextRunUtc);
+            return true;
+        }
+        ++current;
+    }
+
+    for (const auto& job : m_workerJobs) {
+        if (!job.context) {
+            continue;
+        }
+        if (job.context->cancelRequested.load() || job.context->finished.load()) {
+            continue;
+        }
+        if (current == index) {
+            out.id = job.id;
+            out.enabled = !job.context->paused.load();
+            out.mode = SchedulerJobMode::WorkerTask;
+            out.schedule = job.context->schedule;
+            fillNext(job.context->schedule, job.context->hasNext, job.context->nextRunUtc, out.nextRunUtc);
+            return true;
+        }
+        ++current;
+    }
+
+    return false;
+}
+
 bool ESPScheduler::computeNextOccurrence(const Schedule& schedule,
                                          const DateTime& fromUtc,
                                          DateTime& outNextUtc) const {
@@ -430,15 +495,14 @@ void ESPScheduler::runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx) {
     }
 
     ESPDate& date = *ctx->date;
-    DateTime next{};
     while (!ctx->cancelRequested.load()) {
         DateTime now = date.now();
         if (!ctx->hasNext) {
             if (ctx->schedule.isOneShot) {
-                next = ctx->schedule.onceAtUtc;
+                ctx->nextRunUtc = ctx->schedule.onceAtUtc;
                 ctx->hasNext = true;
             } else {
-                ctx->hasNext = computeNextOccurrence(ctx->schedule, now, next);
+                ctx->hasNext = computeNextOccurrence(ctx->schedule, now, ctx->nextRunUtc);
                 if (!ctx->hasNext) {
                     break;
                 }
@@ -450,7 +514,7 @@ void ESPScheduler::runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx) {
             continue;
         }
 
-        const int64_t diffSec = date.differenceInSeconds(next, now);
+        const int64_t diffSec = date.differenceInSeconds(ctx->nextRunUtc, now);
         if (diffSec > 0) {
             const int64_t chunk = (diffSec > kWorkerSleepChunkSeconds) ? kWorkerSleepChunkSeconds : diffSec;
             vTaskDelay(pdMS_TO_TICKS(static_cast<TickType_t>(chunk * 1000)));
@@ -462,8 +526,8 @@ void ESPScheduler::runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx) {
         if (ctx->schedule.isOneShot) {
             break;
         }
-        DateTime from = date.addMinutes(next, 1);
-        ctx->hasNext = computeNextOccurrence(ctx->schedule, from, next);
+        DateTime from = date.addMinutes(ctx->nextRunUtc, 1);
+        ctx->hasNext = computeNextOccurrence(ctx->schedule, from, ctx->nextRunUtc);
         if (!ctx->hasNext) {
             break;
         }

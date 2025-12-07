@@ -39,6 +39,14 @@ static void test_weekly_mask_advances_to_next_weekday() {
   TEST_ASSERT_TRUE(date.isEqual(next, date.fromUtc(2025, 3, 5, 18, 30, 0)));  // Wednesday 18:30
 }
 
+static void test_weekly_zero_mask_defaults_to_any_day() {
+  Schedule s = Schedule::weeklyAtLocal(0, 10, 45);
+  DateTime from = date.fromUtc(2025, 3, 1, 10, 0, 0);
+  DateTime next{};
+  TEST_ASSERT_TRUE(scheduler.computeNextOccurrence(s, from, next));
+  TEST_ASSERT_TRUE(date.isEqual(next, date.fromUtc(2025, 3, 1, 10, 45, 0)));
+}
+
 static void test_dom_dow_or_logic_matches_either() {
   ScheduleField dom = ScheduleField::only(10);
   ScheduleField dow = ScheduleField::only(1);  // Monday = 1 with ESPDate (0=Sun)
@@ -68,6 +76,24 @@ static void test_inline_tick_runs_and_reschedules() {
   TEST_ASSERT_EQUAL(2, inlineHits);
 }
 
+static void test_get_job_info_reports_next_run() {
+  inlineHits = 0;
+  Schedule s = Schedule::dailyAtLocal(6, 0);
+  uint32_t id = scheduler.addJob(s, SchedulerJobMode::Inline, &inlineCallback, nullptr);
+  TEST_ASSERT_NOT_EQUAL(0u, id);
+
+  DateTime now = date.fromUtc(2025, 1, 1, 0, 0, 0);
+  scheduler.tick(now);  // compute next run but do not fire
+  TEST_ASSERT_EQUAL(0, inlineHits);
+
+  JobInfo info{};
+  TEST_ASSERT_TRUE(scheduler.getJobInfo(0, info));
+  TEST_ASSERT_EQUAL(id, info.id);
+  TEST_ASSERT_TRUE(info.enabled);
+  TEST_ASSERT_EQUAL(static_cast<int>(SchedulerJobMode::Inline), static_cast<int>(info.mode));
+  TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, date.fromUtc(2025, 1, 1, 6, 0, 0)));
+}
+
 void setUp() {
   scheduler.cancelAll();
   inlineHits = 0;
@@ -83,8 +109,10 @@ void setup() {
   RUN_TEST(test_daily_at_local_next_same_day);
   RUN_TEST(test_daily_at_local_rolls_to_next_day);
   RUN_TEST(test_weekly_mask_advances_to_next_weekday);
+  RUN_TEST(test_weekly_zero_mask_defaults_to_any_day);
   RUN_TEST(test_dom_dow_or_logic_matches_either);
   RUN_TEST(test_inline_tick_runs_and_reschedules);
+  RUN_TEST(test_get_job_info_reports_next_run);
   UNITY_END();
 }
 
