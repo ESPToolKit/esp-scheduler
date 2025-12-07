@@ -1,0 +1,51 @@
+{
+  "name": "ESPScheduler",
+  "version": "0.1.0",
+  "description": "Cron-style wall-clock scheduler for ESP32 firmware (Arduino or ESP-IDF)",
+  "keywords": [
+    "esp32",
+    "arduino",
+    "scheduler",
+    "cron",
+    "freertos"
+  ],
+  "homepage": "https://github.com/ESPToolKit/esp-scheduler",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ESPToolKit/esp-scheduler.git"
+  },
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "zekageri"
+    }
+  ],
+  "frameworks": [
+    "arduino"
+  ],
+  "platforms": [
+    "espressif32"
+  ],
+  "dependencies": [
+    {
+      "name": "ESPDate",
+      "version": "https://github.com/ESPToolKit/esp-date.git"
+    },
+    {
+      "name": "ESPWorker",
+      "version": "https://github.com/ESPToolKit/esp-worker.git"
+    },
+    {
+      "name": "ArduinoJson",
+      "version": ">=7.0.0"
+    }
+  ],
+  "headers": [
+    "ESPScheduler.h"
+  ],
+  "build": {
+    "flags": [
+      "-std=gnu++17"
+    ]
+  }
+}
