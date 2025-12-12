@@ -23,6 +23,13 @@ Install one of two ways:
   ```
   lib_deps = https://github.com/ESPToolKit/esp-scheduler.git
   ```
+- Arduino CLI: install the library and its deps, then compile any example sketch:
+  ```bash
+  arduino-cli lib install --git-url https://github.com/ESPToolKit/esp-date.git
+  arduino-cli lib install --git-url https://github.com/ESPToolKit/esp-worker.git
+  arduino-cli lib install --git-url https://github.com/ESPToolKit/esp-scheduler.git
+  arduino-cli compile --fqbn esp32:esp32:esp32 examples/inline_daily
+  ```
 
 Then include the scheduler together with its dependencies:
 
@@ -120,6 +127,138 @@ Schedule custom = Schedule::custom(
 - `dayOfMonth` vs `dayOfWeek`: classic cron OR rule when both are restricted; either can satisfy the day check.
 - Clock validity guard: inline and worker paths stay idle while `now()` is before `setMinValidUnixSeconds()` (default 2020-01-01 UTC). Set it to `0` if you explicitly want to allow pre-2000 times.
 
+## Examples
+
+### Inline daily tick (no worker needed)
+```cpp
+#include <Arduino.h>
+#include <ESPDate.h>
+#include <ESPScheduler.h>
+
+static ESPDate date;
+static ESPScheduler scheduler(date);  // no ESPWorker -> Inline jobs only
+
+static void waterPlants(void* /*userData*/) {
+    Serial.println("Watering plants...");
+}
+
+void setup() {
+    Serial.begin(115200);
+    // Set TZ + SNTP before scheduling so local time is valid
+    scheduler.setMinValidUtc(date.fromUtc(2020, 1, 1, 0, 0, 0));
+
+    // 07:00 every day, inline
+    scheduler.addJob(
+        Schedule::dailyAtLocal(7, 0),
+        SchedulerJobMode::Inline,
+        &waterPlants);
+}
+
+void loop() {
+    scheduler.tick();  // computes next runs using date.now()
+    delay(1000);
+}
+```
+
+### Worker task with custom stack/priority
+```cpp
+#include <Arduino.h>
+#include <ESPDate.h>
+#include <ESPWorker.h>
+#include <ESPScheduler.h>
+
+static ESPDate date;
+static ESPWorker worker;
+static ESPScheduler scheduler(date, &worker);
+
+static void backupJob(void* /*userData*/) {
+    Serial.println("Backing up to cloud...");
+    // heavy work is safe here; job owns its own FreeRTOS task
+}
+
+void setup() {
+    Serial.begin(115200);
+    worker.init({ .maxWorkers = 2 });
+    scheduler.setMinValidUtc(date.fromUtc(2020, 1, 1, 0, 0, 0));
+
+    SchedulerTaskConfig cfg;
+    cfg.name = "backup";
+    cfg.stackSize = 8192;
+    cfg.priority = 3;
+    cfg.coreId = 1;
+    cfg.usePsramStack = true;
+
+    scheduler.addJob(
+        Schedule::weeklyAtLocal(0b0000010, 2, 30), // Mondays 02:30 local
+        SchedulerJobMode::WorkerTask,
+        &backupJob,
+        nullptr,
+        &cfg);
+}
+
+void loop() {
+    scheduler.tick();   // still safe to call; frees finished worker metadata
+    delay(1000);
+}
+```
+
+### One-shot + inspecting/pause/resume
+```cpp
+#include <Arduino.h>
+#include <ESPDate.h>
+#include <ESPScheduler.h>
+
+static ESPDate date;
+static ESPScheduler scheduler(date);
+
+static void firmwareSwap(void* /*userData*/) {
+    Serial.println("Swapping firmware banks now");
+}
+
+void setup() {
+    Serial.begin(115200);
+    DateTime when = date.fromUtc(2025, 1, 15, 12, 0, 0);
+    uint32_t id = scheduler.addJobOnceUtc(
+        when,
+        SchedulerJobMode::Inline,
+        &firmwareSwap);
+
+    JobInfo info{};
+    if (scheduler.getJobInfo(0, info)) {
+        Serial.printf("Job %u next run: %lld\n", info.id, info.nextRunUtc.epochSeconds);
+        scheduler.pauseJob(info.id);   // stop until resumeJob is called
+        scheduler.resumeJob(info.id);
+    }
+}
+
+void loop() {
+    scheduler.tick();
+    delay(500);
+}
+```
+
+Example sketches in this repo:
+- `examples/inline_daily/inline_daily.ino` — inline daily tick loop.
+- `examples/inline_one_shot/inline_one_shot.ino` — single UTC trigger inline.
+- `examples/inline_pause_resume/inline_pause_resume.ino` — pausing/resuming a repeating inline job.
+- `examples/worker_weekly/worker_weekly.ino` — weekly heavy job on its own task with custom stack/priority.
+- `examples/worker_one_shot/worker_one_shot.ino` — one-shot worker task using PSRAM stack.
+- `examples/custom_fields/custom_fields.ino` — custom cron fields (every N minutes, selected weekdays/hours).
+- `examples/monthly_on_day/monthly_on_day.ino` — monthly day-of-month trigger with clamping.
+
+## Gotchas
+- Always set time zone and SNTP before scheduling; pair that with `setMinValidUtc` so jobs do not all replay at boot from the 1970 epoch.
+- `SchedulerJobMode::WorkerTask` requires an `ESPWorker` pointer in the constructor; without it, addJob in worker mode will fail.
+- Even when you only run worker tasks, call `tick()` or `cleanup()` periodically so finished worker metadata is freed.
+- `ScheduleField::list` drops out-of-range values; if every entry is invalid, `addJob` returns `0` because the schedule fails validation.
+- Matching happens at minute resolution; if you need per-second triggers, pair ESPScheduler with ESPTimer counters instead.
+
+## Restrictions
+- Designed for ESP32 boards (Arduino-ESP32 or ESP-IDF) with FreeRTOS and C++17 enabled.
+- Depends on ESPDate for wall-clock math; ESPWorker is optional but required for `WorkerTask` jobs.
+- Each worker job spawns its own task with its own stack; size those stacks (or enable PSRAM stacks) according to your workload.
+- Schedules operate in local time and clamp invalid calendar combinations (e.g., 31st on shorter months).
+
 ## Examples (one focus per sketch)
 - `examples/inline_daily/inline_daily.ino` — inline daily tick loop.
 - `examples/inline_one_shot/inline_one_shot.ino` — single UTC trigger inline.
@@ -129,7 +268,16 @@ Schedule custom = Schedule::custom(
 - `examples/custom_fields/custom_fields.ino` — custom cron fields (every N minutes, selected weekdays/hours).
 - `examples/monthly_on_day/monthly_on_day.ino` — monthly day-of-month trigger with clamping.
 
-## Links
-- [ESPToolKit website](https://esptoolkitfrontend.onrender.com/)
-- [ESPToolKit on GitHub](https://github.com/ESPToolKit)
-- [Support ESPToolKit on Ko-Fi](https://ko-fi.com/esptoolkit)
+## Tests
+- Unity-based device tests live in `test/test_esp_scheduler`; drop the folder into a PlatformIO workspace and run `pio test -e esp32dev` against real hardware.
+- Host-side CTest is intentionally skipped because the scheduler relies on ESP32 FreeRTOS and ESPDate wall-clock helpers.
+- CI also compiles all examples through PlatformIO and Arduino CLI across ESP32, S3, C3, and P4 boards.
+
+## License
+MIT — see `LICENSE.md`.
+
+## ESPToolKit
+- Check out other libraries: https://github.com/orgs/ESPToolKit/repositories
+- Hang out on Discord: https://discord.gg/WG8sSqAy
+- Support the project: https://ko-fi.com/esptoolkit
+- Visit the website: https://www.esptoolkit.hu/
