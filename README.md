@@ -39,9 +39,9 @@ Then include the scheduler together with its dependencies:
 #include <ESPWorker.h>
 #include <ESPScheduler.h>
 
-static ESPDate date;
-static ESPWorker worker;
-static ESPScheduler scheduler(date, &worker);
+ESPDate date;
+ESPWorker worker;
+ESPScheduler scheduler(date, &worker);
 
 void morningBackup(void* userData) {
     Serial.println("Running morning backup...");
@@ -135,8 +135,8 @@ Schedule custom = Schedule::custom(
 #include <ESPDate.h>
 #include <ESPScheduler.h>
 
-static ESPDate date;
-static ESPScheduler scheduler(date);  // no ESPWorker -> Inline jobs only
+ESPDate date;
+ESPScheduler scheduler(date);  // no ESPWorker -> Inline jobs only
 
 static void waterPlants(void* /*userData*/) {
     Serial.println("Watering plants...");
@@ -167,9 +167,9 @@ void loop() {
 #include <ESPWorker.h>
 #include <ESPScheduler.h>
 
-static ESPDate date;
-static ESPWorker worker;
-static ESPScheduler scheduler(date, &worker);
+ESPDate date;
+ESPWorker worker;
+ESPScheduler scheduler(date, &worker);
 
 static void backupJob(void* /*userData*/) {
     Serial.println("Backing up to cloud...");
@@ -208,8 +208,8 @@ void loop() {
 #include <ESPDate.h>
 #include <ESPScheduler.h>
 
-static ESPDate date;
-static ESPScheduler scheduler(date);
+ESPDate date;
+ESPScheduler scheduler(date);
 
 static void firmwareSwap(void* /*userData*/) {
     Serial.println("Swapping firmware banks now");
