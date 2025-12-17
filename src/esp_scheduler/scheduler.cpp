@@ -1,6 +1,7 @@
 #include "esp_scheduler/scheduler.h"
 
 #include <algorithm>
+#include <utility>
 
 extern "C" {
 #include "freertos/FreeRTOS.h"
@@ -217,13 +218,40 @@ uint32_t ESPScheduler::addJobOnceUtc(const DateTime& whenUtc,
                                      SchedulerCallback cb,
                                      void* userData,
                                      const SchedulerTaskConfig* taskCfg) {
+    return addJobOnceUtc(whenUtc, mode, SchedulerFunction(cb), userData, taskCfg);
+}
+
+uint32_t ESPScheduler::addJobOnceUtc(const DateTime& whenUtc,
+                                     SchedulerJobMode mode,
+                                     SchedulerFunction cb,
+                                     void* userData,
+                                     const SchedulerTaskConfig* taskCfg) {
     Schedule s = Schedule::onceUtc(whenUtc);
-    return addJob(s, mode, cb, userData, taskCfg);
+    return addJob(s, mode, std::move(cb), userData, taskCfg);
+}
+
+uint32_t ESPScheduler::addJobOnceUtc(const DateTime& whenUtc,
+                                     SchedulerJobMode mode,
+                                     SchedulerFunctionNoData cb,
+                                     const SchedulerTaskConfig* taskCfg) {
+    if (!cb) {
+        return 0;
+    }
+    SchedulerFunction wrapped = [fn = std::move(cb)](void*) { fn(); };
+    return addJobOnceUtc(whenUtc, mode, std::move(wrapped), nullptr, taskCfg);
 }
 
 uint32_t ESPScheduler::addJob(const Schedule& schedule,
                               SchedulerJobMode mode,
                               SchedulerCallback cb,
+                              void* userData,
+                              const SchedulerTaskConfig* taskCfg) {
+    return addJob(schedule, mode, SchedulerFunction(cb), userData, taskCfg);
+}
+
+uint32_t ESPScheduler::addJob(const Schedule& schedule,
+                              SchedulerJobMode mode,
+                              SchedulerFunction cb,
                               void* userData,
                               const SchedulerTaskConfig* taskCfg) {
     if (!cb) {
@@ -242,7 +270,7 @@ uint32_t ESPScheduler::addJob(const Schedule& schedule,
         InlineJob job{};
         job.id = id;
         job.schedule = schedule;
-        job.callback = cb;
+        job.callback = std::move(cb);
         job.userData = userData;
         m_inlineJobs.push_back(job);
         return id;
@@ -250,7 +278,7 @@ uint32_t ESPScheduler::addJob(const Schedule& schedule,
 
     auto ctx = std::make_shared<WorkerJobContext>();
     ctx->schedule = schedule;
-    ctx->callback = cb;
+    ctx->callback = std::move(cb);
     ctx->userData = userData;
     ctx->date = &m_date;
 
@@ -268,6 +296,17 @@ uint32_t ESPScheduler::addJob(const Schedule& schedule,
     job.workerResult = result;
     m_workerJobs.push_back(job);
     return id;
+}
+
+uint32_t ESPScheduler::addJob(const Schedule& schedule,
+                              SchedulerJobMode mode,
+                              SchedulerFunctionNoData cb,
+                              const SchedulerTaskConfig* taskCfg) {
+    if (!cb) {
+        return 0;
+    }
+    SchedulerFunction wrapped = [fn = std::move(cb)](void*) { fn(); };
+    return addJob(schedule, mode, std::move(wrapped), nullptr, taskCfg);
 }
 
 bool ESPScheduler::cancelJob(uint32_t jobId) {

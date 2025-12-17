@@ -7,6 +7,8 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 ## [Unreleased]
 ### Added
 - Clock validity guard: inline and worker jobs stay idle until the wall clock reaches a configurable minimum (default 2020-01-01 UTC) to prevent catch-up storms when SNTP sets time after boot.
+- `std::function` callback overloads for `addJob`/`addJobOnceUtc` to allow capturing lambdas.
+- `std::function<void()>` overloads for `addJob`/`addJobOnceUtc` to allow no-arg lambdas.
 
 ## [1.0.1] - 2025-12-07
 ### Added

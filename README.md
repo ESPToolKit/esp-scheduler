@@ -72,6 +72,8 @@ void loop() {
 - `SchedulerJobMode`: `Inline` (runs inside `tick()`) or `WorkerTask` (dedicated FreeRTOS task via ESPWorker).
 - `SchedulerTaskConfig`: optional worker task config (name, stack size, priority, core, PSRAM stack flag).
 - `SchedulerCallback`: `using SchedulerCallback = void (*)(void* userData);`
+- `SchedulerFunction`: `using SchedulerFunction = std::function<void(void* userData)>;` (capturing lambdas supported).
+- `SchedulerFunctionNoData`: `using SchedulerFunctionNoData = std::function<void()>;` (no-arg lambdas supported).
 - `setMinValidUnixSeconds` / `setMinValidUtc`: block all inline/worker jobs until the wall clock reaches this point (default: 2020-01-01 UTC).
 - `ScheduleField`: bitmask-backed allowed values for one cron field. Builders: `any()`, `only()`, `range()`, `every()`, `rangeEvery()`, `list()`.
 - `Schedule`: one-shot (`onceUtc`) or cron-like via helpers: `dailyAtLocal`, `weeklyAtLocal`, `monthlyOnDayLocal`, `custom`.
@@ -89,6 +91,29 @@ uint32_t id = scheduler.addJob(
 scheduler.pauseJob(id);
 scheduler.resumeJob(id);
 scheduler.cancelJob(id);
+```
+
+Capturing lambda callbacks are supported via the `std::function` overload:
+
+```cpp
+DateTime bootTargetUtc = date.addMinutes(date.now(), 2);
+scheduler.addJobOnceUtc(
+    bootTargetUtc,
+    SchedulerJobMode::Inline,
+    [this](void* /*userData*/) {
+        doSomething();
+    });
+```
+
+No-arg lambdas are also supported:
+
+```cpp
+scheduler.addJobOnceUtc(
+    bootTargetUtc,
+    SchedulerJobMode::Inline,
+    [this]() {
+        doSomething();
+    });
 ```
 
 ## Schedule recipes

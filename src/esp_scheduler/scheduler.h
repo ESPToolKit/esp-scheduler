@@ -5,6 +5,7 @@
 #include <ESPWorker.h>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -22,6 +23,8 @@ struct SchedulerTaskConfig {
 };
 
 using SchedulerCallback = void (*)(void* userData);
+using SchedulerFunction = std::function<void(void* userData)>;
+using SchedulerFunctionNoData = std::function<void()>;
 
 class ScheduleField {
 public:
@@ -90,11 +93,29 @@ public:
                            SchedulerCallback cb,
                            void* userData = nullptr,
                            const SchedulerTaskConfig* taskCfg = nullptr);
+    uint32_t addJobOnceUtc(const DateTime& whenUtc,
+                           SchedulerJobMode mode,
+                           SchedulerFunction cb,
+                           void* userData = nullptr,
+                           const SchedulerTaskConfig* taskCfg = nullptr);
+    uint32_t addJobOnceUtc(const DateTime& whenUtc,
+                           SchedulerJobMode mode,
+                           SchedulerFunctionNoData cb,
+                           const SchedulerTaskConfig* taskCfg = nullptr);
 
     uint32_t addJob(const Schedule& schedule,
                     SchedulerJobMode mode,
                     SchedulerCallback cb,
                     void* userData = nullptr,
+                    const SchedulerTaskConfig* taskCfg = nullptr);
+    uint32_t addJob(const Schedule& schedule,
+                    SchedulerJobMode mode,
+                    SchedulerFunction cb,
+                    void* userData = nullptr,
+                    const SchedulerTaskConfig* taskCfg = nullptr);
+    uint32_t addJob(const Schedule& schedule,
+                    SchedulerJobMode mode,
+                    SchedulerFunctionNoData cb,
                     const SchedulerTaskConfig* taskCfg = nullptr);
 
     bool cancelJob(uint32_t jobId);
@@ -116,7 +137,7 @@ private:
     struct InlineJob {
         uint32_t id = 0;
         Schedule schedule{};
-        SchedulerCallback callback = nullptr;
+        SchedulerFunction callback{};
         void* userData = nullptr;
         DateTime nextRunUtc{};
         bool hasNext = false;
@@ -126,7 +147,7 @@ private:
 
     struct WorkerJobContext {
         Schedule schedule{};
-        SchedulerCallback callback = nullptr;
+        SchedulerFunction callback{};
         void* userData = nullptr;
         ESPDate* date = nullptr;
         std::atomic<bool> paused{false};
