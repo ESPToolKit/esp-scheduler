@@ -11,6 +11,69 @@ extern "C" {
 namespace {
 constexpr int64_t kMaxSearchMinutes = 366 * 24 * 60;
 constexpr int64_t kWorkerSleepChunkSeconds = 60;
+
+bool clockValidForMin(const DateTime& nowUtc, int64_t minValidEpochSeconds) {
+    return nowUtc.epochSeconds >= minValidEpochSeconds;
+}
+
+bool computeNextOccurrenceForDate(const ESPDate& date,
+                                  const Schedule& schedule,
+                                  const DateTime& fromUtc,
+                                  DateTime& outNextUtc) {
+    if (schedule.isOneShot) {
+        outNextUtc = schedule.onceAtUtc;
+        return true;
+    }
+
+    DateTime rounded = fromUtc;
+    if (fromUtc.secondUtc() > 0) {
+        rounded = date.addMinutes(rounded, 1);
+    }
+    rounded = date.setTimeOfDayUtc(rounded, rounded.hourUtc(), rounded.minuteUtc(), 0);
+
+    DateTime cursor = rounded;
+    for (int64_t i = 0; i < kMaxSearchMinutes; ++i) {
+        const int month = date.getMonthLocal(cursor);
+        const int day = date.getDayLocal(cursor);
+        const int dow = date.getWeekdayLocal(cursor);
+
+        const DateTime startOfDay = date.startOfDayLocal(cursor);
+        const int64_t minutesIntoDay = date.differenceInMinutes(cursor, startOfDay);
+        if (minutesIntoDay < 0) {
+            cursor = date.addMinutes(cursor, 1);
+            continue;
+        }
+        const int hour = static_cast<int>(minutesIntoDay / 60);
+        const int minute = static_cast<int>(minutesIntoDay % 60);
+
+        const bool monthOk = schedule.month.matches(month);
+        const bool hourOk = schedule.hour.matches(hour);
+        const bool minuteOk = schedule.minute.matches(minute);
+
+        const bool domAny = schedule.dayOfMonth.isAny();
+        const bool dowAny = schedule.dayOfWeek.isAny();
+        const bool domOk = schedule.dayOfMonth.matches(day);
+        const bool dowOk = schedule.dayOfWeek.matches(dow);
+
+        bool dayOk = false;
+        if (domAny && dowAny) {
+            dayOk = true;
+        } else if (domAny && !dowAny) {
+            dayOk = dowOk;
+        } else if (!domAny && dowAny) {
+            dayOk = domOk;
+        } else {
+            dayOk = domOk || dowOk;
+        }
+
+        if (monthOk && hourOk && minuteOk && dayOk) {
+            outNextUtc = date.setTimeOfDayLocal(cursor, hour, minute, 0);
+            return true;
+        }
+        cursor = date.addMinutes(cursor, 1);
+    }
+    return false;
+}
 }  // namespace
 
 ScheduleField ScheduleField::any() {
@@ -156,10 +219,25 @@ Schedule Schedule::custom(const ScheduleField& minute,
     return s;
 }
 
-ESPScheduler::ESPScheduler(ESPDate& date, ESPWorker* worker) : m_date(date), m_worker(worker) {}
+ESPScheduler::ESPScheduler(ESPDate& date, ESPWorker* worker)
+    : m_date(date),
+      m_worker(worker),
+      m_minValidEpochSecondsRef(std::make_shared<std::atomic<int64_t>>(kDefaultMinValidEpochSeconds)) {}
+
+ESPScheduler::~ESPScheduler() {
+    deinit();
+}
+
+void ESPScheduler::deinit() {
+    cancelAll();
+    m_inlineJobs.clear();
+}
 
 void ESPScheduler::setMinValidUnixSeconds(int64_t minEpochSeconds) {
     m_minValidEpochSeconds = minEpochSeconds;
+    if (m_minValidEpochSecondsRef) {
+        m_minValidEpochSecondsRef->store(minEpochSeconds);
+    }
 }
 
 void ESPScheduler::setMinValidUtc(const DateTime& minUtc) {
@@ -281,9 +359,10 @@ uint32_t ESPScheduler::addJob(const Schedule& schedule,
     ctx->callback = std::move(cb);
     ctx->userData = userData;
     ctx->date = &m_date;
+    ctx->minValidEpochSeconds = m_minValidEpochSecondsRef;
 
     const WorkerConfig workerCfg = makeWorkerConfig(taskCfg);
-    auto task = [this, ctx]() { runWorkerJob(ctx); };
+    auto task = [ctx]() { runWorkerJob(ctx); };
     WorkerResult result = (taskCfg && taskCfg->usePsramStack) ? m_worker->spawnExt(task, workerCfg)
                                                              : m_worker->spawn(task, workerCfg);
     if (!result) {
@@ -488,60 +567,7 @@ bool ESPScheduler::getJobInfo(size_t index, JobInfo& out) const {
 bool ESPScheduler::computeNextOccurrence(const Schedule& schedule,
                                          const DateTime& fromUtc,
                                          DateTime& outNextUtc) const {
-    if (schedule.isOneShot) {
-        outNextUtc = schedule.onceAtUtc;
-        return true;
-    }
-
-    DateTime rounded = fromUtc;
-    if (fromUtc.secondUtc() > 0) {
-        rounded = m_date.addMinutes(rounded, 1);
-    }
-    rounded = m_date.setTimeOfDayUtc(rounded, rounded.hourUtc(), rounded.minuteUtc(), 0);
-
-    DateTime cursor = rounded;
-    for (int64_t i = 0; i < kMaxSearchMinutes; ++i) {
-        const int year = m_date.getYearLocal(cursor);
-        const int month = m_date.getMonthLocal(cursor);
-        const int day = m_date.getDayLocal(cursor);
-        const int dow = m_date.getWeekdayLocal(cursor);
-
-        const DateTime startOfDay = m_date.startOfDayLocal(cursor);
-        const int64_t minutesIntoDay = m_date.differenceInMinutes(cursor, startOfDay);
-        if (minutesIntoDay < 0) {
-            cursor = m_date.addMinutes(cursor, 1);
-            continue;
-        }
-        const int hour = static_cast<int>(minutesIntoDay / 60);
-        const int minute = static_cast<int>(minutesIntoDay % 60);
-
-        const bool monthOk = schedule.month.matches(month);
-        const bool hourOk = schedule.hour.matches(hour);
-        const bool minuteOk = schedule.minute.matches(minute);
-
-        const bool domAny = schedule.dayOfMonth.isAny();
-        const bool dowAny = schedule.dayOfWeek.isAny();
-        const bool domOk = schedule.dayOfMonth.matches(day);
-        const bool dowOk = schedule.dayOfWeek.matches(dow);
-
-        bool dayOk = false;
-        if (domAny && dowAny) {
-            dayOk = true;
-        } else if (domAny && !dowAny) {
-            dayOk = dowOk;
-        } else if (!domAny && dowAny) {
-            dayOk = domOk;
-        } else {
-            dayOk = domOk || dowOk;
-        }
-
-        if (monthOk && hourOk && minuteOk && dayOk) {
-            outNextUtc = m_date.setTimeOfDayLocal(cursor, hour, minute, 0);
-            return true;
-        }
-        cursor = m_date.addMinutes(cursor, 1);
-    }
-    return false;
+    return computeNextOccurrenceForDate(m_date, schedule, fromUtc, outNextUtc);
 }
 
 void ESPScheduler::runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx) {
@@ -552,7 +578,9 @@ void ESPScheduler::runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx) {
     ESPDate& date = *ctx->date;
     while (!ctx->cancelRequested.load()) {
         DateTime now = date.now();
-        if (!clockValid(now)) {
+        const int64_t minValidEpochSeconds =
+            ctx->minValidEpochSeconds ? ctx->minValidEpochSeconds->load() : kDefaultMinValidEpochSeconds;
+        if (!clockValidForMin(now, minValidEpochSeconds)) {
             vTaskDelay(pdMS_TO_TICKS(kWorkerSleepChunkSeconds * 1000));
             continue;
         }
@@ -561,7 +589,7 @@ void ESPScheduler::runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx) {
                 ctx->nextRunUtc = ctx->schedule.onceAtUtc;
                 ctx->hasNext = true;
             } else {
-                ctx->hasNext = computeNextOccurrence(ctx->schedule, now, ctx->nextRunUtc);
+                ctx->hasNext = computeNextOccurrenceForDate(date, ctx->schedule, now, ctx->nextRunUtc);
                 if (!ctx->hasNext) {
                     break;
                 }
@@ -586,7 +614,7 @@ void ESPScheduler::runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx) {
             break;
         }
         DateTime from = date.addMinutes(ctx->nextRunUtc, 1);
-        ctx->hasNext = computeNextOccurrence(ctx->schedule, from, ctx->nextRunUtc);
+        ctx->hasNext = computeNextOccurrenceForDate(date, ctx->schedule, from, ctx->nextRunUtc);
         if (!ctx->hasNext) {
             break;
         }
@@ -595,7 +623,7 @@ void ESPScheduler::runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx) {
 }
 
 bool ESPScheduler::clockValid(const DateTime& nowUtc) const {
-    return nowUtc.epochSeconds >= m_minValidEpochSeconds;
+    return clockValidForMin(nowUtc, m_minValidEpochSeconds);
 }
 
 WorkerConfig ESPScheduler::makeWorkerConfig(const SchedulerTaskConfig* taskCfg) const {

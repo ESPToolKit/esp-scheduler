@@ -79,6 +79,7 @@ void loop() {
 - `Schedule`: one-shot (`onceUtc`) or cron-like via helpers: `dailyAtLocal`, `weeklyAtLocal`, `monthlyOnDayLocal`, `custom`.
 - `JobInfo` / `getJobInfo(index, info)`: inspect active jobs (inline first, then worker), including enabled state, schedule copy, and next run (if known).
 - `cleanup()`: manually purge finished inline/worker jobs when you are not calling `tick()`.
+- `deinit()`: cancels and destroys all active jobs; destructor calls it automatically.
 
 ```cpp
 ESPScheduler scheduler(date, &worker);              // worker optional; required for WorkerTask mode

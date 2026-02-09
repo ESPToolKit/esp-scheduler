@@ -82,6 +82,8 @@ public:
     static constexpr int64_t kDefaultMinValidEpochSeconds = 1577836800;
 
     ESPScheduler(ESPDate& date, ESPWorker* worker = nullptr);
+    ~ESPScheduler();
+    void deinit();
 
     // Configure / inspect the minimum valid wall-clock time; scheduler idles until time >= min.
     void setMinValidUnixSeconds(int64_t minEpochSeconds);
@@ -150,6 +152,7 @@ private:
         SchedulerFunction callback{};
         void* userData = nullptr;
         ESPDate* date = nullptr;
+        std::shared_ptr<std::atomic<int64_t>> minValidEpochSeconds{};
         std::atomic<bool> paused{false};
         std::atomic<bool> cancelRequested{false};
         std::atomic<bool> finished{false};
@@ -167,7 +170,7 @@ private:
     bool validateSchedule(const Schedule& schedule) const;
     bool fieldWithinRange(const ScheduleField& field, int min, int max) const;
     uint64_t allowedMask(int min, int max) const;
-    void runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx);
+    static void runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx);
     WorkerConfig makeWorkerConfig(const SchedulerTaskConfig* taskCfg) const;
     void cleanupInline();
     void cleanupWorkers();
@@ -177,6 +180,7 @@ private:
     ESPWorker* m_worker;
     uint32_t m_nextId = 1;
     int64_t m_minValidEpochSeconds = kDefaultMinValidEpochSeconds;
+    std::shared_ptr<std::atomic<int64_t>> m_minValidEpochSecondsRef;
     std::vector<InlineJob> m_inlineJobs;
     std::vector<WorkerJob> m_workerJobs;
 };

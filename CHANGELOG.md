@@ -10,6 +10,10 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 - `std::function` callback overloads for `addJob`/`addJobOnceUtc` to allow capturing lambdas.
 - `std::function<void()>` overloads for `addJob`/`addJobOnceUtc` to allow no-arg lambdas.
 - Added focused recurring-pattern examples for every minute, every day, every hour, selected weekdays, and work-hour interval schedules.
+- `deinit()` plus destructor cleanup for deterministic job teardown, including worker task destruction.
+
+### Fixed
+- Worker job tasks no longer capture the scheduler instance pointer, avoiding use-after-free risks during scheduler teardown.
 
 ## [1.0.1] - 2025-12-07
 ### Added
