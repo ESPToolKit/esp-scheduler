@@ -266,6 +266,12 @@ Example sketches in this repo:
 - `examples/inline_daily/inline_daily.ino` — inline daily tick loop.
 - `examples/inline_one_shot/inline_one_shot.ino` — single UTC trigger inline.
 - `examples/inline_pause_resume/inline_pause_resume.ino` — pausing/resuming a repeating inline job.
+- `examples/inline_every_day_midnight/inline_every_day_midnight.ino` — every day at local midnight.
+- `examples/inline_every_hour/inline_every_hour.ino` — every hour (top of hour) every day.
+- `examples/inline_every_minute/inline_every_minute.ino` — every minute all day.
+- `examples/inline_every_minute_selected_days/inline_every_minute_selected_days.ino` — every minute on selected weekdays.
+- `examples/inline_every_hour_selected_days/inline_every_hour_selected_days.ino` — every hour on selected weekdays.
+- `examples/inline_every_15_minutes_work_hours/inline_every_15_minutes_work_hours.ino` — every 15 minutes during business hours.
 - `examples/worker_weekly/worker_weekly.ino` — weekly heavy job on its own task with custom stack/priority.
 - `examples/worker_one_shot/worker_one_shot.ino` — one-shot worker task using PSRAM stack.
 - `examples/custom_fields/custom_fields.ino` — custom cron fields (every N minutes, selected weekdays/hours).
@@ -288,6 +294,12 @@ Example sketches in this repo:
 - `examples/inline_daily/inline_daily.ino` — inline daily tick loop.
 - `examples/inline_one_shot/inline_one_shot.ino` — single UTC trigger inline.
 - `examples/inline_pause_resume/inline_pause_resume.ino` — pausing/resuming a repeating inline job.
+- `examples/inline_every_day_midnight/inline_every_day_midnight.ino` — every day at local midnight.
+- `examples/inline_every_hour/inline_every_hour.ino` — every hour (top of hour) every day.
+- `examples/inline_every_minute/inline_every_minute.ino` — every minute all day.
+- `examples/inline_every_minute_selected_days/inline_every_minute_selected_days.ino` — every minute on selected weekdays.
+- `examples/inline_every_hour_selected_days/inline_every_hour_selected_days.ino` — every hour on selected weekdays.
+- `examples/inline_every_15_minutes_work_hours/inline_every_15_minutes_work_hours.ino` — every 15 minutes during business hours.
 - `examples/worker_weekly/worker_weekly.ino` — weekly heavy job on its own task with custom stack/priority.
 - `examples/worker_one_shot/worker_one_shot.ino` — one-shot worker task using PSRAM stack.
 - `examples/custom_fields/custom_fields.ino` — custom cron fields (every N minutes, selected weekdays/hours).
