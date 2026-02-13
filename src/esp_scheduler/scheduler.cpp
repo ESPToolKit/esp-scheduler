@@ -628,7 +628,7 @@ bool ESPScheduler::clockValid(const DateTime& nowUtc) const {
 
 WorkerConfig ESPScheduler::makeWorkerConfig(const SchedulerTaskConfig* taskCfg) const {
     WorkerConfig cfg{};
-    cfg.stackSize = taskCfg ? taskCfg->stackSize : SchedulerTaskConfig{}.stackSize;
+    cfg.stackSizeBytes = taskCfg ? taskCfg->stackSize : SchedulerTaskConfig{}.stackSize;
     cfg.priority = taskCfg ? taskCfg->priority : SchedulerTaskConfig{}.priority;
     cfg.coreId = taskCfg ? taskCfg->coreId : SchedulerTaskConfig{}.coreId;
     cfg.useExternalStack = taskCfg ? taskCfg->usePsramStack : SchedulerTaskConfig{}.usePsramStack;

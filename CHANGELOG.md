@@ -14,6 +14,7 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 
 ### Fixed
 - Worker job tasks no longer capture the scheduler instance pointer, avoiding use-after-free risks during scheduler teardown.
+- Worker config bridge now maps `SchedulerTaskConfig::stackSize` to `WorkerConfig::stackSizeBytes` for ESPWorker compatibility.
 
 ## [1.0.1] - 2025-12-07
 ### Added
