@@ -1,6 +1,6 @@
 # ESPScheduler
 
-ESPScheduler is a C++17, class-based scheduler for ESP32 firmware that brings cron-like calendar patterns without parsing cron strings. It builds on [ESPDate](https://github.com/ESPToolKit/esp-date) for all wall-clock math and can run jobs either inline (driven by `tick()`) or on dedicated FreeRTOS tasks via [ESPWorker](https://github.com/ESPToolKit/esp-worker).
+ESPScheduler is a C++17, class-based scheduler for ESP32 firmware that brings cron-like calendar patterns without parsing cron strings. It builds on [ESPDate](https://github.com/ESPToolKit/esp-date) for all wall-clock math and can run jobs either inline (driven by `tick()`) or on dedicated native FreeRTOS tasks.
 
 ## CI / Release / License
 [![CI](https://github.com/ESPToolKit/esp-scheduler/actions/workflows/ci.yml/badge.svg)](https://github.com/ESPToolKit/esp-scheduler/actions/workflows/ci.yml)
@@ -9,7 +9,7 @@ ESPScheduler is a C++17, class-based scheduler for ESP32 firmware that brings cr
 
 ## Features
 - **Cron-style patterns, no strings**: express minute/hour/day/month/weekday filters with `ScheduleField` objects and helpers for daily/weekly/monthly runs.
-- **Inline or worker execution**: run callbacks inside `tick()` or on their own FreeRTOS task via ESPWorker (with separate PSRAM policies for buffers and task stacks).
+- **Inline or worker execution**: run callbacks inside `tick()` or on their own FreeRTOS task (with separate PSRAM policies for buffers and task stacks).
 - **One-shot UTC triggers**: schedule absolute UTC times alongside recurring patterns.
 - **Calendar-aware**: respects classic cron `dayOfMonth` vs `dayOfWeek` logic and always operates in local time.
 - **Clock guard for unset RTC**: defaults to idling until the wall clock reaches 2020-01-01 UTC (configurable) so jobs do not replay from the 1970 epoch when SNTP syncs later.
@@ -27,7 +27,6 @@ Install one of two ways:
 - Arduino CLI: install the library and its deps, then compile any example sketch:
   ```bash
   arduino-cli lib install --git-url https://github.com/ESPToolKit/esp-date.git
-  arduino-cli lib install --git-url https://github.com/ESPToolKit/esp-worker.git
   arduino-cli lib install --git-url https://github.com/ESPToolKit/esp-scheduler.git
   arduino-cli compile --fqbn esp32:esp32:esp32 examples/inline_daily
   ```
@@ -37,12 +36,10 @@ Then include the scheduler together with its dependencies:
 ```cpp
 #include <Arduino.h>
 #include <ESPDate.h>
-#include <ESPWorker.h>
 #include <ESPScheduler.h>
 
 ESPDate date;
-ESPWorker worker;
-ESPScheduler scheduler(date, &worker);
+ESPScheduler scheduler(date);
 
 void morningBackup(void* userData) {
     Serial.println("Running morning backup...");
@@ -51,7 +48,6 @@ void morningBackup(void* userData) {
 void setup() {
     Serial.begin(115200);
     // Configure SNTP/time zone before scheduling so ESPDate reports valid local time.
-    worker.init({ .maxWorkers = 4 });
     // Optional: raise the minimum valid clock to block jobs until SNTP sets time.
     scheduler.setMinValidUtc(date.fromUtc(2020, 1, 1, 0, 0, 0));
 
@@ -70,7 +66,7 @@ void loop() {
 ```
 
 ## API quick map
-- `SchedulerJobMode`: `Inline` (runs inside `tick()`) or `WorkerTask` (dedicated FreeRTOS task via ESPWorker).
+- `SchedulerJobMode`: `Inline` (runs inside `tick()`) or `WorkerTask` (dedicated FreeRTOS task).
 - `ESPSchedulerConfig`: scheduler-level memory policy (`usePSRAMBuffers`) for scheduler-owned dynamic buffers.
 - `SchedulerTaskConfig`: optional worker task config (name, stack size, priority, core, PSRAM stack flag).
 - `SchedulerCallback`: `using SchedulerCallback = void (*)(void* userData);`
@@ -86,7 +82,7 @@ void loop() {
 ```cpp
 ESPSchedulerConfig schedCfg;
 schedCfg.usePSRAMBuffers = true;                    // falls back safely when PSRAM is unavailable
-ESPScheduler scheduler(date, &worker, schedCfg);    // worker optional; required for WorkerTask mode
+ESPScheduler scheduler(date, schedCfg);
 uint32_t id = scheduler.addJob(
     Schedule::dailyAtLocal(7, 30),
     SchedulerJobMode::Inline,
@@ -147,8 +143,8 @@ Schedule custom = Schedule::custom(
 ```
 
 ### Execution modes
-- **Inline**: call `tick()` periodically; callbacks run in the caller’s context. Works without ESPWorker.
-- **WorkerTask**: requires ESPWorker; each job gets its own FreeRTOS task that sleeps until due. Configure stacks/priority/affinity via `SchedulerTaskConfig`.
+- **Inline**: call `tick()` periodically; callbacks run in the caller’s context.
+- **WorkerTask**: each job gets its own FreeRTOS task that sleeps until due. Configure stacks/priority/affinity via `SchedulerTaskConfig`.
 - **Memory policy split**: `ESPSchedulerConfig::usePSRAMBuffers` controls scheduler-owned dynamic buffer placement; `SchedulerTaskConfig::usePsramStack` controls worker task stack placement.
 - Even if you only schedule `WorkerTask` jobs, call `tick()` or `cleanup()` occasionally so the scheduler can drop finished worker job metadata.
 
@@ -167,7 +163,7 @@ Schedule custom = Schedule::custom(
 #include <ESPScheduler.h>
 
 ESPDate date;
-ESPScheduler scheduler(date);  // no ESPWorker -> Inline jobs only
+ESPScheduler scheduler(date);  // inline jobs only
 
 static void waterPlants(void* /*userData*/) {
     Serial.println("Watering plants...");
@@ -195,12 +191,10 @@ void loop() {
 ```cpp
 #include <Arduino.h>
 #include <ESPDate.h>
-#include <ESPWorker.h>
 #include <ESPScheduler.h>
 
 ESPDate date;
-ESPWorker worker;
-ESPScheduler scheduler(date, &worker);
+ESPScheduler scheduler(date);
 
 static void backupJob(void* /*userData*/) {
     Serial.println("Backing up to cloud...");
@@ -209,7 +203,6 @@ static void backupJob(void* /*userData*/) {
 
 void setup() {
     Serial.begin(115200);
-    worker.init({ .maxWorkers = 2 });
     scheduler.setMinValidUtc(date.fromUtc(2020, 1, 1, 0, 0, 0));
 
     SchedulerTaskConfig cfg;
@@ -285,14 +278,13 @@ Example sketches in this repo:
 
 ## Gotchas
 - Always set time zone and SNTP before scheduling; pair that with `setMinValidUtc` so jobs do not all replay at boot from the 1970 epoch.
-- `SchedulerJobMode::WorkerTask` requires an `ESPWorker` pointer in the constructor; without it, addJob in worker mode will fail.
 - Even when you only run worker tasks, call `tick()` or `cleanup()` periodically so finished worker metadata is freed.
 - `ScheduleField::list` drops out-of-range values; if every entry is invalid, `addJob` returns `0` because the schedule fails validation.
 - Matching happens at minute resolution; if you need per-second triggers, pair ESPScheduler with ESPTimer counters instead.
 
 ## Restrictions
 - Designed for ESP32 boards (Arduino-ESP32 or ESP-IDF) with FreeRTOS and C++17 enabled.
-- Depends on ESPDate for wall-clock math; ESPWorker is optional but required for `WorkerTask` jobs.
+- Depends on ESPDate for wall-clock math.
 - Each worker job spawns its own task with its own stack; size those stacks (or enable PSRAM stacks) according to your workload.
 - Schedules operate in local time and clamp invalid calendar combinations (e.g., 31st on shorter months).
 

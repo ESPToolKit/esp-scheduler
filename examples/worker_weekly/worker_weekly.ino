@@ -1,11 +1,9 @@
 #include <Arduino.h>
 #include <ESPDate.h>
-#include <ESPWorker.h>
 #include <ESPScheduler.h>
 
 ESPDate date;
-ESPWorker worker;
-ESPScheduler scheduler(date, &worker);
+ESPScheduler scheduler(date);
 
 void weeklyReport(void* userData) {
   (void)userData;
@@ -19,8 +17,6 @@ void setup() {
   delay(200);
   Serial.println("ESPScheduler weekly worker example");
   Serial.println("Configure SNTP/time zone so local matching works.");
-
-  worker.init({.maxWorkers = 4});
 
   uint8_t weekdaysMask = 0b0111110;  // Monday..Friday
   SchedulerTaskConfig cfg{};

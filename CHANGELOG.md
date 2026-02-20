@@ -16,7 +16,7 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 
 ### Fixed
 - Worker job tasks no longer capture the scheduler instance pointer, avoiding use-after-free risks during scheduler teardown.
-- Worker config bridge now maps `SchedulerTaskConfig::stackSize` to `WorkerConfig::stackSizeBytes` for ESPWorker compatibility.
+- Worker jobs now spawn directly via FreeRTOS (`xTaskCreatePinnedToCore`) using `SchedulerTaskConfig` values.
 - Scheduler-owned inline/worker job container allocations and worker context allocations now follow the scheduler PSRAM buffer policy while keeping task-stack PSRAM handling (`usePsramStack`) separate.
 
 ## [1.0.1] - 2025-12-07

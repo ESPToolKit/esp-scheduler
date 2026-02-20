@@ -1,11 +1,9 @@
 #include <Arduino.h>
 #include <ESPDate.h>
-#include <ESPWorker.h>
 #include <ESPScheduler.h>
 
 ESPDate date;
-ESPWorker worker;
-ESPScheduler scheduler(date, &worker);
+ESPScheduler scheduler(date);
 
 void singleTask(void* userData) {
   (void)userData;
@@ -17,8 +15,6 @@ void setup() {
   delay(200);
   Serial.println("ESPScheduler one-shot worker example");
   Serial.println("Make sure system time is set before scheduling.");
-
-  worker.init({.maxWorkers = 2});
 
   SchedulerTaskConfig cfg{};
   cfg.name = "single-run";

@@ -1,6 +1,7 @@
 #include "esp_scheduler/scheduler.h"
 
 #include <algorithm>
+#include <new>
 #include <utility>
 
 extern "C" {
@@ -227,11 +228,12 @@ ESPScheduler::ESPScheduler(ESPDate& date, const ESPSchedulerConfig& config)
 
 ESPScheduler::ESPScheduler(ESPDate& date, ESPWorker* worker, const ESPSchedulerConfig& config)
     : m_date(date),
-      m_worker(worker),
       m_minValidEpochSecondsRef(std::make_shared<std::atomic<int64_t>>(kDefaultMinValidEpochSeconds)),
       usePSRAMBuffers_(config.usePSRAMBuffers),
       m_inlineJobs(SchedulerAllocator<InlineJob>(usePSRAMBuffers_)),
-      m_workerJobs(SchedulerAllocator<WorkerJob>(usePSRAMBuffers_)) {}
+      m_workerJobs(SchedulerAllocator<WorkerJob>(usePSRAMBuffers_)) {
+    (void)worker;
+}
 
 ESPScheduler::~ESPScheduler() {
     deinit();
@@ -347,10 +349,6 @@ uint32_t ESPScheduler::addJob(const Schedule& schedule,
     if (!validateSchedule(schedule)) {
         return 0;
     }
-    if (mode == SchedulerJobMode::WorkerTask && m_worker == nullptr) {
-        return 0;
-    }
-
     const uint32_t id = nextId();
 
     if (mode == SchedulerJobMode::Inline) {
@@ -370,18 +368,29 @@ uint32_t ESPScheduler::addJob(const Schedule& schedule,
     ctx->date = &m_date;
     ctx->minValidEpochSeconds = m_minValidEpochSecondsRef;
 
-    const WorkerConfig workerCfg = makeWorkerConfig(taskCfg);
-    auto task = [ctx]() { runWorkerJob(ctx); };
-    WorkerResult result = (taskCfg && taskCfg->usePsramStack) ? m_worker->spawnExt(task, workerCfg)
-                                                             : m_worker->spawn(task, workerCfg);
-    if (!result) {
+    const SchedulerTaskConfig runtimeCfg = makeTaskConfig(taskCfg);
+    auto* taskCtx = new (std::nothrow) std::shared_ptr<WorkerJobContext>(ctx);
+    if (!taskCtx) {
+        return 0;
+    }
+    TaskHandle_t taskHandle = nullptr;
+    const BaseType_t created = xTaskCreatePinnedToCore(
+        &ESPScheduler::workerTaskEntry,
+        runtimeCfg.name ? runtimeCfg.name : "sched-job",
+        runtimeCfg.stackSize,
+        taskCtx,
+        runtimeCfg.priority,
+        &taskHandle,
+        runtimeCfg.coreId);
+    if (created != pdPASS || taskHandle == nullptr) {
+        delete taskCtx;
         return 0;
     }
 
     WorkerJob job{};
     job.id = id;
     job.context = ctx;
-    job.workerResult = result;
+    job.task = taskHandle;
     m_workerJobs.push_back(job);
     return id;
 }
@@ -408,9 +417,6 @@ bool ESPScheduler::cancelJob(uint32_t jobId) {
     for (auto& job : m_workerJobs) {
         if (job.id == jobId && job.context) {
             job.context->cancelRequested.store(true);
-            if (job.workerResult.handler) {
-                job.workerResult.handler->destroy();
-            }
             canceled = true;
         }
     }
@@ -460,9 +466,6 @@ void ESPScheduler::cancelAll() {
     for (auto& job : m_workerJobs) {
         if (job.context) {
             job.context->cancelRequested.store(true);
-        }
-        if (job.workerResult.handler) {
-            job.workerResult.handler->destroy();
         }
     }
     cleanupInline();
@@ -635,14 +638,26 @@ bool ESPScheduler::clockValid(const DateTime& nowUtc) const {
     return clockValidForMin(nowUtc, m_minValidEpochSeconds);
 }
 
-WorkerConfig ESPScheduler::makeWorkerConfig(const SchedulerTaskConfig* taskCfg) const {
-    WorkerConfig cfg{};
-    cfg.stackSizeBytes = taskCfg ? taskCfg->stackSize : SchedulerTaskConfig{}.stackSize;
+SchedulerTaskConfig ESPScheduler::makeTaskConfig(const SchedulerTaskConfig* taskCfg) const {
+    SchedulerTaskConfig cfg{};
+    cfg.stackSize = taskCfg ? taskCfg->stackSize : SchedulerTaskConfig{}.stackSize;
     cfg.priority = taskCfg ? taskCfg->priority : SchedulerTaskConfig{}.priority;
     cfg.coreId = taskCfg ? taskCfg->coreId : SchedulerTaskConfig{}.coreId;
-    cfg.useExternalStack = taskCfg ? taskCfg->usePsramStack : SchedulerTaskConfig{}.usePsramStack;
+    cfg.usePsramStack = taskCfg ? taskCfg->usePsramStack : SchedulerTaskConfig{}.usePsramStack;
     cfg.name = taskCfg && taskCfg->name ? taskCfg->name : "sched-job";
     return cfg;
+}
+
+void ESPScheduler::workerTaskEntry(void* arg) {
+    auto* ctxPtr = static_cast<std::shared_ptr<WorkerJobContext>*>(arg);
+    if (!ctxPtr) {
+        vTaskDelete(nullptr);
+        return;
+    }
+    std::shared_ptr<WorkerJobContext> ctx = *ctxPtr;
+    delete ctxPtr;
+    runWorkerJob(ctx);
+    vTaskDelete(nullptr);
 }
 
 void ESPScheduler::cleanupInline() {

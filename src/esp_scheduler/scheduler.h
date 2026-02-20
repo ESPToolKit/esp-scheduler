@@ -2,13 +2,19 @@
 
 #include <Arduino.h>
 #include <ESPDate.h>
-#include <ESPWorker.h>
 
 #include <atomic>
 #include <functional>
 #include <memory>
 
+extern "C" {
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+}
+
 #include "scheduler_allocator.h"
+
+class ESPWorker;
 
 enum class SchedulerJobMode : uint8_t {
     Inline,
@@ -172,7 +178,7 @@ private:
     struct WorkerJob {
         uint32_t id = 0;
         std::shared_ptr<WorkerJobContext> context{};
-        WorkerResult workerResult{};
+        TaskHandle_t task = nullptr;
     };
 
     uint32_t nextId();
@@ -180,13 +186,13 @@ private:
     bool fieldWithinRange(const ScheduleField& field, int min, int max) const;
     uint64_t allowedMask(int min, int max) const;
     static void runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx);
-    WorkerConfig makeWorkerConfig(const SchedulerTaskConfig* taskCfg) const;
+    SchedulerTaskConfig makeTaskConfig(const SchedulerTaskConfig* taskCfg) const;
+    static void workerTaskEntry(void* arg);
     void cleanupInline();
     void cleanupWorkers();
     bool clockValid(const DateTime& nowUtc) const;
 
     ESPDate& m_date;
-    ESPWorker* m_worker;
     uint32_t m_nextId = 1;
     int64_t m_minValidEpochSeconds = kDefaultMinValidEpochSeconds;
     std::shared_ptr<std::atomic<int64_t>> m_minValidEpochSecondsRef;

@@ -32,10 +32,6 @@
       "version": "https://github.com/ESPToolKit/esp-date.git"
     },
     {
-      "name": "ESPWorker",
-      "version": "https://github.com/ESPToolKit/esp-worker.git"
-    },
-    {
       "name": "ArduinoJson",
       "version": ">=7.0.0"
     },
