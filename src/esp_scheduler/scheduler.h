@@ -7,7 +7,8 @@
 #include <atomic>
 #include <functional>
 #include <memory>
-#include <vector>
+
+#include "scheduler_allocator.h"
 
 enum class SchedulerJobMode : uint8_t {
     Inline,
@@ -20,6 +21,12 @@ struct SchedulerTaskConfig {
     UBaseType_t priority = 1;
     BaseType_t coreId = tskNO_AFFINITY;
     bool usePsramStack = false;
+};
+
+struct ESPSchedulerConfig {
+    // Prefer PSRAM-backed buffers for scheduler-owned dynamic containers.
+    // Falls back to default heap automatically when unavailable.
+    bool usePSRAMBuffers = false;
 };
 
 using SchedulerCallback = void (*)(void* userData);
@@ -82,6 +89,8 @@ public:
     static constexpr int64_t kDefaultMinValidEpochSeconds = 1577836800;
 
     ESPScheduler(ESPDate& date, ESPWorker* worker = nullptr);
+    ESPScheduler(ESPDate& date, const ESPSchedulerConfig& config);
+    ESPScheduler(ESPDate& date, ESPWorker* worker, const ESPSchedulerConfig& config);
     ~ESPScheduler();
     void deinit();
 
@@ -181,6 +190,7 @@ private:
     uint32_t m_nextId = 1;
     int64_t m_minValidEpochSeconds = kDefaultMinValidEpochSeconds;
     std::shared_ptr<std::atomic<int64_t>> m_minValidEpochSecondsRef;
-    std::vector<InlineJob> m_inlineJobs;
-    std::vector<WorkerJob> m_workerJobs;
+    bool usePSRAMBuffers_ = false;
+    SchedulerVector<InlineJob> m_inlineJobs;
+    SchedulerVector<WorkerJob> m_workerJobs;
 };

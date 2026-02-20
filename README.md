@@ -9,10 +9,11 @@ ESPScheduler is a C++17, class-based scheduler for ESP32 firmware that brings cr
 
 ## Features
 - **Cron-style patterns, no strings**: express minute/hour/day/month/weekday filters with `ScheduleField` objects and helpers for daily/weekly/monthly runs.
-- **Inline or worker execution**: run callbacks inside `tick()` or on their own FreeRTOS task via ESPWorker (with PSRAM stack option).
+- **Inline or worker execution**: run callbacks inside `tick()` or on their own FreeRTOS task via ESPWorker (with separate PSRAM policies for buffers and task stacks).
 - **One-shot UTC triggers**: schedule absolute UTC times alongside recurring patterns.
 - **Calendar-aware**: respects classic cron `dayOfMonth` vs `dayOfWeek` logic and always operates in local time.
 - **Clock guard for unset RTC**: defaults to idling until the wall clock reaches 2020-01-01 UTC (configurable) so jobs do not replay from the 1970 epoch when SNTP syncs later.
+- **Optional PSRAM buffer policy**: `ESPSchedulerConfig::usePSRAMBuffers` routes scheduler-owned job/context storage through ESPBufferManager with automatic fallback to default heap.
 - **Class-based API**: everything hangs off an `ESPScheduler` instance; no global namespaces or macros.
 - **Arduino / ESP-IDF friendly**: C++17, metadata for PlatformIO/Arduino CLI, and examples/tests ready for CI.
 
@@ -70,6 +71,7 @@ void loop() {
 
 ## API quick map
 - `SchedulerJobMode`: `Inline` (runs inside `tick()`) or `WorkerTask` (dedicated FreeRTOS task via ESPWorker).
+- `ESPSchedulerConfig`: scheduler-level memory policy (`usePSRAMBuffers`) for scheduler-owned dynamic buffers.
 - `SchedulerTaskConfig`: optional worker task config (name, stack size, priority, core, PSRAM stack flag).
 - `SchedulerCallback`: `using SchedulerCallback = void (*)(void* userData);`
 - `SchedulerFunction`: `using SchedulerFunction = std::function<void(void* userData)>;` (capturing lambdas supported).
@@ -82,7 +84,9 @@ void loop() {
 - `deinit()`: cancels and destroys all active jobs; destructor calls it automatically.
 
 ```cpp
-ESPScheduler scheduler(date, &worker);              // worker optional; required for WorkerTask mode
+ESPSchedulerConfig schedCfg;
+schedCfg.usePSRAMBuffers = true;                    // falls back safely when PSRAM is unavailable
+ESPScheduler scheduler(date, &worker, schedCfg);    // worker optional; required for WorkerTask mode
 uint32_t id = scheduler.addJob(
     Schedule::dailyAtLocal(7, 30),
     SchedulerJobMode::Inline,
@@ -145,6 +149,7 @@ Schedule custom = Schedule::custom(
 ### Execution modes
 - **Inline**: call `tick()` periodically; callbacks run in the caller’s context. Works without ESPWorker.
 - **WorkerTask**: requires ESPWorker; each job gets its own FreeRTOS task that sleeps until due. Configure stacks/priority/affinity via `SchedulerTaskConfig`.
+- **Memory policy split**: `ESPSchedulerConfig::usePSRAMBuffers` controls scheduler-owned dynamic buffer placement; `SchedulerTaskConfig::usePsramStack` controls worker task stack placement.
 - Even if you only schedule `WorkerTask` jobs, call `tick()` or `cleanup()` occasionally so the scheduler can drop finished worker job metadata.
 
 ### Cron semantics

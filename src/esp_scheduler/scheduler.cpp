@@ -220,9 +220,18 @@ Schedule Schedule::custom(const ScheduleField& minute,
 }
 
 ESPScheduler::ESPScheduler(ESPDate& date, ESPWorker* worker)
+    : ESPScheduler(date, worker, ESPSchedulerConfig{}) {}
+
+ESPScheduler::ESPScheduler(ESPDate& date, const ESPSchedulerConfig& config)
+    : ESPScheduler(date, nullptr, config) {}
+
+ESPScheduler::ESPScheduler(ESPDate& date, ESPWorker* worker, const ESPSchedulerConfig& config)
     : m_date(date),
       m_worker(worker),
-      m_minValidEpochSecondsRef(std::make_shared<std::atomic<int64_t>>(kDefaultMinValidEpochSeconds)) {}
+      m_minValidEpochSecondsRef(std::make_shared<std::atomic<int64_t>>(kDefaultMinValidEpochSeconds)),
+      usePSRAMBuffers_(config.usePSRAMBuffers),
+      m_inlineJobs(SchedulerAllocator<InlineJob>(usePSRAMBuffers_)),
+      m_workerJobs(SchedulerAllocator<WorkerJob>(usePSRAMBuffers_)) {}
 
 ESPScheduler::~ESPScheduler() {
     deinit();
@@ -354,7 +363,7 @@ uint32_t ESPScheduler::addJob(const Schedule& schedule,
         return id;
     }
 
-    auto ctx = std::make_shared<WorkerJobContext>();
+    auto ctx = std::allocate_shared<WorkerJobContext>(SchedulerAllocator<WorkerJobContext>(usePSRAMBuffers_));
     ctx->schedule = schedule;
     ctx->callback = std::move(cb);
     ctx->userData = userData;

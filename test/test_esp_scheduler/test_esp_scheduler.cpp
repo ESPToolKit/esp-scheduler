@@ -109,6 +109,21 @@ static void test_tick_waits_until_clock_valid() {
     TEST_ASSERT_EQUAL(1, inlineHits);
 }
 
+static void test_psram_buffer_config_constructor_adds_inline_job() {
+    ESPSchedulerConfig cfg{};
+    cfg.usePSRAMBuffers = true;
+    ESPScheduler localScheduler(date, cfg);
+
+    uint32_t id = localScheduler.addJob(
+        Schedule::dailyAtLocal(12, 0),
+        SchedulerJobMode::Inline,
+        &inlineCallback,
+        nullptr);
+    TEST_ASSERT_NOT_EQUAL(0u, id);
+
+    localScheduler.cancelAll();
+}
+
 void setUp() {
     scheduler.cancelAll();
     scheduler.setMinValidUnixSeconds(ESPScheduler::kDefaultMinValidEpochSeconds);
@@ -130,6 +145,7 @@ void setup() {
     RUN_TEST(test_inline_tick_runs_and_reschedules);
     RUN_TEST(test_get_job_info_reports_next_run);
     RUN_TEST(test_tick_waits_until_clock_valid);
+    RUN_TEST(test_psram_buffer_config_constructor_adds_inline_job);
     UNITY_END();
 }
 
