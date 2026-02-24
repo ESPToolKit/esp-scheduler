@@ -13,11 +13,14 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 - `deinit()` plus destructor cleanup for deterministic job teardown, including worker task destruction.
 - `ESPSchedulerConfig` with `usePSRAMBuffers` toggle to route scheduler-owned dynamic buffers through ESPBufferManager (safe fallback to default heap when PSRAM is unavailable).
 - Additive constructor overloads that accept `ESPSchedulerConfig` while preserving existing constructor signatures.
+- `isInitialized()` lifecycle state on `ESPScheduler`, including explicit teardown/re-init behavior after `deinit()`.
+- Lifecycle Unity tests for teardown safety (`deinit` before use, repeated `deinit`, and re-init by scheduling again).
 
 ### Fixed
 - Worker job tasks no longer capture the scheduler instance pointer, avoiding use-after-free risks during scheduler teardown.
 - Worker jobs now spawn directly via FreeRTOS (`xTaskCreatePinnedToCore`) using `SchedulerTaskConfig` values.
 - Scheduler-owned inline/worker job container allocations and worker context allocations now follow the scheduler PSRAM buffer policy while keeping task-stack PSRAM handling (`usePsramStack`) separate.
+- `deinit()` now releases scheduler-owned runtime buffers and is fully idempotent when called multiple times.
 
 ## [1.0.1] - 2025-12-07
 ### Added

@@ -99,6 +99,7 @@ public:
     ESPScheduler(ESPDate& date, ESPWorker* worker, const ESPSchedulerConfig& config);
     ~ESPScheduler();
     void deinit();
+    bool isInitialized() const;
 
     // Configure / inspect the minimum valid wall-clock time; scheduler idles until time >= min.
     void setMinValidUnixSeconds(int64_t minEpochSeconds);
@@ -191,11 +192,13 @@ private:
     void cleanupInline();
     void cleanupWorkers();
     bool clockValid(const DateTime& nowUtc) const;
+    void ensureInitialized();
 
     ESPDate& m_date;
     uint32_t m_nextId = 1;
     int64_t m_minValidEpochSeconds = kDefaultMinValidEpochSeconds;
     std::shared_ptr<std::atomic<int64_t>> m_minValidEpochSecondsRef;
+    std::atomic<bool> m_initialized{true};
     bool usePSRAMBuffers_ = false;
     SchedulerVector<InlineJob> m_inlineJobs;
     SchedulerVector<WorkerJob> m_workerJobs;

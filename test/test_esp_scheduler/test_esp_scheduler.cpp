@@ -124,6 +124,42 @@ static void test_psram_buffer_config_constructor_adds_inline_job() {
     localScheduler.cancelAll();
 }
 
+static void test_deinit_is_idempotent_and_safe_when_uninitialized() {
+    ESPScheduler localScheduler(date);
+    TEST_ASSERT_TRUE(localScheduler.isInitialized());
+
+    DateTime when = date.fromUtc(2025, 1, 1, 12, 0, 0);
+    uint32_t id = localScheduler.addJobOnceUtc(when, SchedulerJobMode::Inline, &inlineCallback, nullptr);
+    TEST_ASSERT_NOT_EQUAL(0u, id);
+
+    localScheduler.deinit();
+    TEST_ASSERT_FALSE(localScheduler.isInitialized());
+
+    JobInfo info{};
+    TEST_ASSERT_FALSE(localScheduler.getJobInfo(0, info));
+    TEST_ASSERT_FALSE(localScheduler.cancelJob(id));
+    TEST_ASSERT_FALSE(localScheduler.pauseJob(id));
+    TEST_ASSERT_FALSE(localScheduler.resumeJob(id));
+
+    localScheduler.deinit();
+    TEST_ASSERT_FALSE(localScheduler.isInitialized());
+}
+
+static void test_scheduler_reinitializes_after_deinit() {
+    ESPScheduler localScheduler(date);
+    localScheduler.deinit();
+    TEST_ASSERT_FALSE(localScheduler.isInitialized());
+
+    inlineHits = 0;
+    DateTime when = date.fromUtc(2025, 1, 1, 12, 0, 0);
+    uint32_t id = localScheduler.addJobOnceUtc(when, SchedulerJobMode::Inline, &inlineCallback, nullptr);
+    TEST_ASSERT_NOT_EQUAL(0u, id);
+    TEST_ASSERT_TRUE(localScheduler.isInitialized());
+
+    localScheduler.tick(when);
+    TEST_ASSERT_EQUAL(1, inlineHits);
+}
+
 void setUp() {
     scheduler.cancelAll();
     scheduler.setMinValidUnixSeconds(ESPScheduler::kDefaultMinValidEpochSeconds);
@@ -146,6 +182,8 @@ void setup() {
     RUN_TEST(test_get_job_info_reports_next_run);
     RUN_TEST(test_tick_waits_until_clock_valid);
     RUN_TEST(test_psram_buffer_config_constructor_adds_inline_job);
+    RUN_TEST(test_deinit_is_idempotent_and_safe_when_uninitialized);
+    RUN_TEST(test_scheduler_reinitializes_after_deinit);
     UNITY_END();
 }
 

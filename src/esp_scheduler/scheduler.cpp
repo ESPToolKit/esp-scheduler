@@ -240,8 +240,34 @@ ESPScheduler::~ESPScheduler() {
 }
 
 void ESPScheduler::deinit() {
-    cancelAll();
-    m_inlineJobs.clear();
+    if (!m_initialized.exchange(false, std::memory_order_relaxed)) {
+        return;
+    }
+
+    for (auto& job : m_inlineJobs) {
+        job.finished = true;
+    }
+    for (auto& job : m_workerJobs) {
+        if (job.context) {
+            job.context->cancelRequested.store(true);
+        }
+    }
+    cleanupInline();
+    m_workerJobs.clear();
+
+    SchedulerVector<InlineJob>(SchedulerAllocator<InlineJob>(usePSRAMBuffers_)).swap(m_inlineJobs);
+    SchedulerVector<WorkerJob>(SchedulerAllocator<WorkerJob>(usePSRAMBuffers_)).swap(m_workerJobs);
+    m_nextId = 1;
+}
+
+bool ESPScheduler::isInitialized() const {
+    return m_initialized.load(std::memory_order_relaxed);
+}
+
+void ESPScheduler::ensureInitialized() {
+    if (!isInitialized()) {
+        m_initialized.store(true, std::memory_order_relaxed);
+    }
 }
 
 void ESPScheduler::setMinValidUnixSeconds(int64_t minEpochSeconds) {
@@ -349,6 +375,7 @@ uint32_t ESPScheduler::addJob(const Schedule& schedule,
     if (!validateSchedule(schedule)) {
         return 0;
     }
+    ensureInitialized();
     const uint32_t id = nextId();
 
     if (mode == SchedulerJobMode::Inline) {
@@ -407,6 +434,10 @@ uint32_t ESPScheduler::addJob(const Schedule& schedule,
 }
 
 bool ESPScheduler::cancelJob(uint32_t jobId) {
+    if (!isInitialized()) {
+        return false;
+    }
+
     bool canceled = false;
     for (auto& job : m_inlineJobs) {
         if (job.id == jobId && !job.finished) {
@@ -428,6 +459,10 @@ bool ESPScheduler::cancelJob(uint32_t jobId) {
 }
 
 bool ESPScheduler::pauseJob(uint32_t jobId) {
+    if (!isInitialized()) {
+        return false;
+    }
+
     for (auto& job : m_inlineJobs) {
         if (job.id == jobId && !job.finished) {
             job.paused = true;
@@ -444,6 +479,10 @@ bool ESPScheduler::pauseJob(uint32_t jobId) {
 }
 
 bool ESPScheduler::resumeJob(uint32_t jobId) {
+    if (!isInitialized()) {
+        return false;
+    }
+
     for (auto& job : m_inlineJobs) {
         if (job.id == jobId && !job.finished) {
             job.paused = false;
@@ -460,6 +499,10 @@ bool ESPScheduler::resumeJob(uint32_t jobId) {
 }
 
 void ESPScheduler::cancelAll() {
+    if (!isInitialized()) {
+        return;
+    }
+
     for (auto& job : m_inlineJobs) {
         job.finished = true;
     }
@@ -475,6 +518,10 @@ void ESPScheduler::cancelAll() {
 void ESPScheduler::tick() { tick(m_date.now()); }
 
 void ESPScheduler::tick(const DateTime& nowUtc) {
+    if (!isInitialized()) {
+        return;
+    }
+
     if (!clockValid(nowUtc)) {
         return;
     }
@@ -516,11 +563,20 @@ void ESPScheduler::tick(const DateTime& nowUtc) {
 }
 
 void ESPScheduler::cleanup() {
+    if (!isInitialized()) {
+        return;
+    }
+
     cleanupInline();
     cleanupWorkers();
 }
 
 bool ESPScheduler::getJobInfo(size_t index, JobInfo& out) const {
+    if (!isInitialized()) {
+        out = JobInfo{};
+        return false;
+    }
+
     out = JobInfo{};
     size_t current = 0;
     auto fillNext = [this](const Schedule& schedule, bool hasNext, const DateTime& storedNext, DateTime& outNext) {

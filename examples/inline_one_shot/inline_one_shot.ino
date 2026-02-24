@@ -4,10 +4,12 @@
 
 ESPDate date;
 ESPScheduler scheduler(date);
+bool done = false;
 
 void onceInline(void* userData) {
   (void)userData;
   Serial.println("[scheduler] one-shot inline callback fired");
+  done = true;
 }
 
 void setup() {
@@ -21,6 +23,12 @@ void setup() {
 }
 
 void loop() {
-  scheduler.tick();
+  if (scheduler.isInitialized()) {
+    scheduler.tick();
+  }
+  if (done && scheduler.isInitialized()) {
+    scheduler.deinit();
+    Serial.println("[scheduler] deinit complete");
+  }
   delay(2000);
 }
