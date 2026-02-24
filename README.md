@@ -65,6 +65,15 @@ void loop() {
 }
 ```
 
+Call `deinit()` explicitly when you no longer need scheduled jobs (for example before deep sleep or component shutdown):
+
+```cpp
+scheduler.deinit();
+if (!scheduler.isInitialized()) {
+    Serial.println("Scheduler stopped");
+}
+```
+
 ## API quick map
 - `SchedulerJobMode`: `Inline` (runs inside `tick()`) or `WorkerTask` (dedicated FreeRTOS task).
 - `ESPSchedulerConfig`: scheduler-level memory policy (`usePSRAMBuffers`) for scheduler-owned dynamic buffers.
@@ -78,6 +87,7 @@ void loop() {
 - `JobInfo` / `getJobInfo(index, info)`: inspect active jobs (inline first, then worker), including enabled state, schedule copy, and next run (if known).
 - `cleanup()`: manually purge finished inline/worker jobs when you are not calling `tick()`.
 - `deinit()`: cancels and destroys all active jobs; destructor calls it automatically.
+- `isInitialized()`: reports whether the scheduler is currently active after construction/re-init and false after `deinit()`.
 
 ```cpp
 ESPSchedulerConfig schedCfg;
