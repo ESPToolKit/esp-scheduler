@@ -1,6 +1,6 @@
 {
   "name": "ESPScheduler",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Cron-style wall-clock scheduler for ESP32 firmware (Arduino or ESP-IDF)",
   "keywords": [
     "esp32",
