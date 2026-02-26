@@ -56,7 +56,8 @@ void setup() {
     scheduler.addJob(
         Schedule::weeklyAtLocal(weekdaysMask, 7, 30),
         SchedulerJobMode::WorkerTask,
-        &morningBackup);
+        &morningBackup
+    );
 }
 
 void loop() {
@@ -97,7 +98,8 @@ uint32_t id = scheduler.addJob(
     Schedule::dailyAtLocal(7, 30),
     SchedulerJobMode::Inline,
     &myCallback,
-    nullptr);
+    nullptr
+);
 
 scheduler.pauseJob(id);
 scheduler.resumeJob(id);
@@ -113,7 +115,8 @@ scheduler.addJobOnceUtc(
     SchedulerJobMode::Inline,
     [this](void* /*userData*/) {
         doSomething();
-    });
+    }
+);
 ```
 
 No-arg lambdas are also supported:
@@ -124,7 +127,8 @@ scheduler.addJobOnceUtc(
     SchedulerJobMode::Inline,
     [this]() {
         doSomething();
-    });
+    }
+);
 ```
 
 ## Schedule recipes
@@ -145,11 +149,12 @@ Schedule monthly = Schedule::monthlyOnDayLocal(1, 9, 0);
 // Custom cron-like: every 5 minutes between 9-17 on Mon/Wed/Fri
 int days[] = {1, 3, 5};
 Schedule custom = Schedule::custom(
-    ScheduleField::every(5),              // minute
-    ScheduleField::range(9, 17),          // hour
-    ScheduleField::any(),                 // day of month
-    ScheduleField::any(),                 // month
-    ScheduleField::list(days, 3));        // day of week
+    ScheduleField::every(5),        // minute
+    ScheduleField::range(9, 17),    // hour
+    ScheduleField::any(),           // day of month
+    ScheduleField::any(),           // month
+    ScheduleField::list(days, 3)    // day of week
+);
 ```
 
 ### Execution modes
@@ -188,7 +193,8 @@ void setup() {
     scheduler.addJob(
         Schedule::dailyAtLocal(7, 0),
         SchedulerJobMode::Inline,
-        &waterPlants);
+        &waterPlants
+    );
 }
 
 void loop() {
@@ -227,7 +233,8 @@ void setup() {
         SchedulerJobMode::WorkerTask,
         &backupJob,
         nullptr,
-        &cfg);
+        &cfg
+    );
 }
 
 void loop() {
@@ -255,7 +262,8 @@ void setup() {
     uint32_t id = scheduler.addJobOnceUtc(
         when,
         SchedulerJobMode::Inline,
-        &firmwareSwap);
+        &firmwareSwap
+    );
 
     JobInfo info{};
     if (scheduler.getJobInfo(0, info)) {
