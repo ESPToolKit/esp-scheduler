@@ -21,6 +21,26 @@ enum class SchedulerJobMode : uint8_t {
     WorkerTask
 };
 
+enum class ScheduleKind : uint8_t {
+    Cron,
+    OneShotUtc,
+    Sunrise,
+    Sunset,
+    MoonPhaseAngle,
+    MoonIlluminationPercent
+};
+
+enum class MoonPhaseName : uint8_t {
+    NewMoon,
+    WaxingCrescent,
+    FirstQuarter,
+    WaxingGibbous,
+    FullMoon,
+    WaningGibbous,
+    LastQuarter,
+    WaningCrescent
+};
+
 struct SchedulerTaskConfig {
     const char* name = "sched-job";
     uint32_t stackSize = 4096;         // bytes
@@ -60,6 +80,7 @@ private:
 };
 
 struct Schedule {
+    ScheduleKind kind = ScheduleKind::Cron;
     bool isOneShot = false;
     DateTime onceAtUtc{};
 
@@ -69,11 +90,22 @@ struct Schedule {
     ScheduleField month = ScheduleField::any();
     ScheduleField dayOfWeek = ScheduleField::any();
 
+    int sunOffsetMinutes = 0;
+    int moonPhaseAngleDegrees = 0;
+    int moonPhaseToleranceDegrees = 1;
+    double moonIlluminationTargetPercent = 0.0;
+    double moonIlluminationTolerancePercent = 0.5;
+
     static Schedule onceUtc(const DateTime& whenUtc);
     static Schedule dailyAtLocal(int hour, int minute);
     // dowMask bits: 0=Sun..6=Sat; empty mask falls back to any day of week.
     static Schedule weeklyAtLocal(uint8_t dowMask, int hour, int minute);
     static Schedule monthlyOnDayLocal(int dayOfMonth, int hour, int minute);
+    static Schedule sunrise(int offsetMinutes = 0);
+    static Schedule sunset(int offsetMinutes = 0);
+    static Schedule moonPhaseAngle(int angleDegrees, int toleranceDegrees = 1);
+    static Schedule moonPhase(MoonPhaseName name, int toleranceDegrees = 1);
+    static Schedule moonIlluminationPercent(double percent, double tolerancePercent = 0.5);
     static Schedule custom(const ScheduleField& minute,
                            const ScheduleField& hour,
                            const ScheduleField& dom,

@@ -11,6 +11,7 @@ ESPScheduler is a C++17, class-based scheduler for ESP32 firmware that brings cr
 - **Cron-style patterns, no strings**: express minute/hour/day/month/weekday filters with `ScheduleField` objects and helpers for daily/weekly/monthly runs.
 - **Inline or worker execution**: run callbacks inside `tick()` or on their own FreeRTOS task (with separate PSRAM policies for buffers and task stacks).
 - **One-shot UTC triggers**: schedule absolute UTC times alongside recurring patterns.
+- **Astronomical schedules**: trigger jobs at sunrise/sunset (with minute offsets), moon phase angles/names, and moon illumination crossings.
 - **Calendar-aware**: respects classic cron `dayOfMonth` vs `dayOfWeek` logic and always operates in local time.
 - **Clock guard for unset RTC**: defaults to idling until the wall clock reaches 2020-01-01 UTC (configurable) so jobs do not replay from the 1970 epoch when SNTP syncs later.
 - **Optional PSRAM buffer policy**: `ESPSchedulerConfig::usePSRAMBuffers` routes scheduler-owned job/context storage through ESPBufferManager with automatic fallback to default heap.
@@ -85,6 +86,7 @@ if (!scheduler.isInitialized()) {
 - `setMinValidUnixSeconds` / `setMinValidUtc`: block all inline/worker jobs until the wall clock reaches this point (default: 2020-01-01 UTC).
 - `ScheduleField`: bitmask-backed allowed values for one cron field. Builders: `any()`, `only()`, `range()`, `every()`, `rangeEvery()`, `list()`.
 - `Schedule`: one-shot (`onceUtc`) or cron-like via helpers: `dailyAtLocal`, `weeklyAtLocal`, `monthlyOnDayLocal`, `custom`.
+- Astronomical helpers: `sunrise(offsetMin)`, `sunset(offsetMin)`, `moonPhase(name/tolerance)`, `moonPhaseAngle(angle/tolerance)`, `moonIlluminationPercent(percent/tolerance)`.
 - `JobInfo` / `getJobInfo(index, info)`: inspect active jobs (inline first, then worker), including enabled state, schedule copy, and next run (if known).
 - `cleanup()`: manually purge finished inline/worker jobs when you are not calling `tick()`.
 - `deinit()`: cancels and destroys all active jobs; destructor calls it automatically.
@@ -155,6 +157,14 @@ Schedule custom = Schedule::custom(
     ScheduleField::any(),           // month
     ScheduleField::list(days, 3)    // day of week
 );
+
+// Astronomical schedules (requires ESPDate initialized with latitude/longitude + TZ)
+Schedule sunriseNow = Schedule::sunrise();                       // exactly sunrise
+Schedule sunsetLate = Schedule::sunset(15);                      // sunset + 15 minutes
+Schedule preDawn = Schedule::sunrise(-30);                       // sunrise - 30 minutes
+Schedule lastQuarter = Schedule::moonPhase(MoonPhaseName::LastQuarter, 2);
+Schedule phase270 = Schedule::moonPhaseAngle(270, 2);            // explicit angle
+Schedule illum75 = Schedule::moonIlluminationPercent(75.0, 0.5); // percent + tolerance
 ```
 
 ### Execution modes
@@ -167,9 +177,12 @@ Schedule custom = Schedule::custom(
 - Resolution: minutes (seconds always treated as zero).
 - Local time matching via ESPDate; honour your TZ/DST setup before scheduling.
 - `dayOfMonth` vs `dayOfWeek`: classic cron OR rule when both are restricted; either can satisfy the day check.
+- Astronomical moon jobs trigger on crossing events (with tolerance), not exact floating-point equality checks.
 - Clock validity guard: inline and worker paths stay idle while `now()` is before `setMinValidUnixSeconds()` (default 2020-01-01 UTC). Set it to `0` if you explicitly want to allow pre-2000 times.
 
 ## Examples
+
+For sun/moon schedules, see `examples/inline_astronomical/inline_astronomical.ino`.
 
 ### Inline daily tick (no worker needed)
 ```cpp

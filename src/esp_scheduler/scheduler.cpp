@@ -1,6 +1,7 @@
 #include "esp_scheduler/scheduler.h"
 
 #include <algorithm>
+#include <cmath>
 #include <new>
 #include <utility>
 
@@ -11,27 +12,101 @@ extern "C" {
 
 namespace {
 constexpr int64_t kMaxSearchMinutes = 366 * 24 * 60;
+constexpr int64_t kMaxSunSearchDays = 732;
+constexpr int64_t kMaxMoonSearchMinutes = 62 * 24 * 60;
 constexpr int64_t kWorkerSleepChunkSeconds = 60;
+constexpr int kMinSunOffsetMinutes = -1440;
+constexpr int kMaxSunOffsetMinutes = 1440;
+constexpr int kMinMoonPhaseAngle = 0;
+constexpr int kMaxMoonPhaseAngle = 359;
+constexpr int kMaxMoonPhaseTolerance = 30;
+constexpr double kMinIlluminationPercent = 0.0;
+constexpr double kMaxIlluminationPercent = 100.0;
+constexpr double kMaxIlluminationTolerancePercent = 50.0;
+constexpr double kFullCircleDegrees = 360.0;
+constexpr double kComparisonEpsilon = 1e-9;
 
 bool clockValidForMin(const DateTime& nowUtc, int64_t minValidEpochSeconds) {
     return nowUtc.epochSeconds >= minValidEpochSeconds;
 }
 
-bool computeNextOccurrenceForDate(const ESPDate& date,
-                                  const Schedule& schedule,
-                                  const DateTime& fromUtc,
-                                  DateTime& outNextUtc) {
-    if (schedule.isOneShot) {
-        outNextUtc = schedule.onceAtUtc;
-        return true;
+ScheduleKind resolvedScheduleKind(const Schedule& schedule) {
+    if (schedule.kind == ScheduleKind::Cron && schedule.isOneShot) {
+        return ScheduleKind::OneShotUtc;
     }
+    return schedule.kind;
+}
 
+bool isOneShotSchedule(const Schedule& schedule) {
+    return resolvedScheduleKind(schedule) == ScheduleKind::OneShotUtc;
+}
+
+DateTime roundToNextMinute(const ESPDate& date, const DateTime& fromUtc) {
     DateTime rounded = fromUtc;
     if (fromUtc.secondUtc() > 0) {
         rounded = date.addMinutes(rounded, 1);
     }
-    rounded = date.setTimeOfDayUtc(rounded, rounded.hourUtc(), rounded.minuteUtc(), 0);
+    return date.setTimeOfDayUtc(rounded, rounded.hourUtc(), rounded.minuteUtc(), 0);
+}
 
+double normalizeAngle360(double angle) {
+    double normalized = std::fmod(angle, kFullCircleDegrees);
+    if (normalized < 0.0) {
+        normalized += kFullCircleDegrees;
+    }
+    return normalized;
+}
+
+double unwrapAngle(double previousUnwrapped, double currentWrapped) {
+    const double previousWrapped = normalizeAngle360(previousUnwrapped);
+    double delta = currentWrapped - previousWrapped;
+    if (delta > 180.0) {
+        delta -= kFullCircleDegrees;
+    } else if (delta < -180.0) {
+        delta += kFullCircleDegrees;
+    }
+    return previousUnwrapped + delta;
+}
+
+bool valueWithinPeriodicWindow(double value, double center, double tolerance) {
+    const double distance = std::fabs(value - center);
+    double wrapped = std::fmod(distance, kFullCircleDegrees);
+    if (wrapped < 0.0) {
+        wrapped += kFullCircleDegrees;
+    }
+    const double minimumDistance = std::min(wrapped, kFullCircleDegrees - wrapped);
+    return minimumDistance <= tolerance + kComparisonEpsilon;
+}
+
+bool segmentIntersectsRange(double a, double b, double minValue, double maxValue) {
+    const double lo = std::min(a, b);
+    const double hi = std::max(a, b);
+    return hi >= minValue - kComparisonEpsilon && lo <= maxValue + kComparisonEpsilon;
+}
+
+bool segmentIntersectsPeriodicWindow(double a, double b, double center, double tolerance) {
+    const double lo = std::min(a, b);
+    const double hi = std::max(a, b);
+    const int64_t firstPeriod =
+        static_cast<int64_t>(std::floor((lo - (center + tolerance)) / kFullCircleDegrees)) - 1;
+    const int64_t lastPeriod =
+        static_cast<int64_t>(std::ceil((hi - (center - tolerance)) / kFullCircleDegrees)) + 1;
+    for (int64_t period = firstPeriod; period <= lastPeriod; ++period) {
+        const double periodShift = static_cast<double>(period) * kFullCircleDegrees;
+        const double windowMin = center - tolerance + periodShift;
+        const double windowMax = center + tolerance + periodShift;
+        if (segmentIntersectsRange(lo, hi, windowMin, windowMax)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool computeNextCronOccurrenceForDate(const ESPDate& date,
+                                      const Schedule& schedule,
+                                      const DateTime& fromUtc,
+                                      DateTime& outNextUtc) {
+    const DateTime rounded = roundToNextMinute(date, fromUtc);
     DateTime cursor = rounded;
     for (int64_t i = 0; i < kMaxSearchMinutes; ++i) {
         const int month = date.getMonthLocal(cursor);
@@ -74,6 +149,161 @@ bool computeNextOccurrenceForDate(const ESPDate& date,
         cursor = date.addMinutes(cursor, 1);
     }
     return false;
+}
+
+bool computeNextSunOccurrenceForDate(const ESPDate& date,
+                                     const Schedule& schedule,
+                                     const DateTime& fromUtc,
+                                     DateTime& outNextUtc,
+                                     bool sunrise) {
+    const DateTime rounded = roundToNextMinute(date, fromUtc);
+    const DateTime startDay = date.startOfDayLocal(rounded);
+    for (int64_t dayOffset = 0; dayOffset < kMaxSunSearchDays; ++dayOffset) {
+        const DateTime dayCursor = date.addDays(startDay, static_cast<int32_t>(dayOffset));
+        const SunCycleResult cycle = sunrise ? date.sunrise(dayCursor) : date.sunset(dayCursor);
+        if (!cycle.ok) {
+            continue;
+        }
+        const DateTime candidate = date.addMinutes(cycle.value, schedule.sunOffsetMinutes);
+        if (date.isBefore(candidate, rounded)) {
+            continue;
+        }
+        outNextUtc = candidate;
+        return true;
+    }
+    return false;
+}
+
+bool moonPhaseCrossed(double previousUnwrapped,
+                      double currentUnwrapped,
+                      double targetAngleDegrees,
+                      double toleranceDegrees) {
+    if (valueWithinPeriodicWindow(previousUnwrapped, targetAngleDegrees, toleranceDegrees)) {
+        return false;
+    }
+    return segmentIntersectsPeriodicWindow(previousUnwrapped, currentUnwrapped, targetAngleDegrees, toleranceDegrees);
+}
+
+bool moonIlluminationCrossed(double previousValue, double currentValue, double targetPercent, double tolerancePercent) {
+    const double minWindow = targetPercent - tolerancePercent;
+    const double maxWindow = targetPercent + tolerancePercent;
+    const bool wasInside = previousValue >= minWindow - kComparisonEpsilon && previousValue <= maxWindow + kComparisonEpsilon;
+    if (wasInside) {
+        return false;
+    }
+    return segmentIntersectsRange(previousValue, currentValue, minWindow, maxWindow);
+}
+
+bool computeNextMoonPhaseOccurrenceForDate(const ESPDate& date,
+                                           const Schedule& schedule,
+                                           const DateTime& fromUtc,
+                                           DateTime& outNextUtc) {
+    const DateTime rounded = roundToNextMinute(date, fromUtc);
+    DateTime previous = date.addMinutes(rounded, -1);
+    DateTime current = rounded;
+
+    MoonPhaseResult previousPhase = date.moonPhase(previous);
+    if (!previousPhase.ok) {
+        return false;
+    }
+    double previousUnwrapped = static_cast<double>(previousPhase.angleDegrees);
+
+    for (int64_t i = 0; i < kMaxMoonSearchMinutes; ++i) {
+        MoonPhaseResult currentPhase = date.moonPhase(current);
+        if (!currentPhase.ok) {
+            return false;
+        }
+        const double currentUnwrapped = unwrapAngle(previousUnwrapped, static_cast<double>(currentPhase.angleDegrees));
+        if (moonPhaseCrossed(previousUnwrapped,
+                             currentUnwrapped,
+                             static_cast<double>(schedule.moonPhaseAngleDegrees),
+                             static_cast<double>(schedule.moonPhaseToleranceDegrees))) {
+            outNextUtc = current;
+            return true;
+        }
+        previousUnwrapped = currentUnwrapped;
+        current = date.addMinutes(current, 1);
+    }
+    return false;
+}
+
+bool computeNextMoonIlluminationOccurrenceForDate(const ESPDate& date,
+                                                  const Schedule& schedule,
+                                                  const DateTime& fromUtc,
+                                                  DateTime& outNextUtc) {
+    const DateTime rounded = roundToNextMinute(date, fromUtc);
+    DateTime previous = date.addMinutes(rounded, -1);
+    DateTime current = rounded;
+
+    MoonPhaseResult previousPhase = date.moonPhase(previous);
+    if (!previousPhase.ok) {
+        return false;
+    }
+    double previousIllumination = previousPhase.illumination * kMaxIlluminationPercent;
+
+    for (int64_t i = 0; i < kMaxMoonSearchMinutes; ++i) {
+        MoonPhaseResult currentPhase = date.moonPhase(current);
+        if (!currentPhase.ok) {
+            return false;
+        }
+        const double currentIllumination = currentPhase.illumination * kMaxIlluminationPercent;
+        if (moonIlluminationCrossed(previousIllumination,
+                                    currentIllumination,
+                                    schedule.moonIlluminationTargetPercent,
+                                    schedule.moonIlluminationTolerancePercent)) {
+            outNextUtc = current;
+            return true;
+        }
+        previousIllumination = currentIllumination;
+        current = date.addMinutes(current, 1);
+    }
+    return false;
+}
+
+int moonPhaseAngleForName(MoonPhaseName name) {
+    switch (name) {
+        case MoonPhaseName::NewMoon:
+            return 0;
+        case MoonPhaseName::WaxingCrescent:
+            return 45;
+        case MoonPhaseName::FirstQuarter:
+            return 90;
+        case MoonPhaseName::WaxingGibbous:
+            return 135;
+        case MoonPhaseName::FullMoon:
+            return 180;
+        case MoonPhaseName::WaningGibbous:
+            return 225;
+        case MoonPhaseName::LastQuarter:
+            return 270;
+        case MoonPhaseName::WaningCrescent:
+            return 315;
+        default:
+            return 0;
+    }
+}
+
+bool computeNextOccurrenceForDate(const ESPDate& date,
+                                  const Schedule& schedule,
+                                  const DateTime& fromUtc,
+                                  DateTime& outNextUtc) {
+    switch (resolvedScheduleKind(schedule)) {
+        case ScheduleKind::OneShotUtc:
+            outNextUtc = schedule.onceAtUtc;
+            return true;
+        case ScheduleKind::Cron:
+            return computeNextCronOccurrenceForDate(date, schedule, fromUtc, outNextUtc);
+        case ScheduleKind::Sunrise:
+            return computeNextSunOccurrenceForDate(date, schedule, fromUtc, outNextUtc, true);
+        case ScheduleKind::Sunset:
+            return computeNextSunOccurrenceForDate(date, schedule, fromUtc, outNextUtc, false);
+        case ScheduleKind::MoonPhaseAngle:
+            return computeNextMoonPhaseOccurrenceForDate(date, schedule, fromUtc, outNextUtc);
+        case ScheduleKind::MoonIlluminationPercent:
+            return computeNextMoonIlluminationOccurrenceForDate(date, schedule, fromUtc, outNextUtc);
+        default:
+            return false;
+    }
 }
 }  // namespace
 
@@ -154,6 +384,7 @@ bool ScheduleField::matches(int value) const {
 
 Schedule Schedule::onceUtc(const DateTime& whenUtc) {
     Schedule s;
+    s.kind = ScheduleKind::OneShotUtc;
     s.isOneShot = true;
     s.onceAtUtc = whenUtc;
     return s;
@@ -161,6 +392,8 @@ Schedule Schedule::onceUtc(const DateTime& whenUtc) {
 
 Schedule Schedule::dailyAtLocal(int hour, int minute) {
     Schedule s;
+    s.kind = ScheduleKind::Cron;
+    s.isOneShot = false;
     s.hour = ScheduleField::only(hour);
     s.minute = ScheduleField::only(minute);
     s.dayOfMonth = ScheduleField::any();
@@ -178,6 +411,8 @@ Schedule Schedule::weeklyAtLocal(uint8_t dowMask, int hour, int minute) {
         }
     }
     Schedule s;
+    s.kind = ScheduleKind::Cron;
+    s.isOneShot = false;
     s.hour = ScheduleField::only(hour);
     s.minute = ScheduleField::only(minute);
     s.dayOfMonth = ScheduleField::any();
@@ -192,6 +427,8 @@ Schedule Schedule::weeklyAtLocal(uint8_t dowMask, int hour, int minute) {
 
 Schedule Schedule::monthlyOnDayLocal(int dayOfMonth, int hour, int minute) {
     Schedule s;
+    s.kind = ScheduleKind::Cron;
+    s.isOneShot = false;
     int clamped = dayOfMonth;
     if (clamped < 1) {
         clamped = 1;
@@ -206,12 +443,52 @@ Schedule Schedule::monthlyOnDayLocal(int dayOfMonth, int hour, int minute) {
     return s;
 }
 
+Schedule Schedule::sunrise(int offsetMinutes) {
+    Schedule s;
+    s.kind = ScheduleKind::Sunrise;
+    s.isOneShot = false;
+    s.sunOffsetMinutes = offsetMinutes;
+    return s;
+}
+
+Schedule Schedule::sunset(int offsetMinutes) {
+    Schedule s;
+    s.kind = ScheduleKind::Sunset;
+    s.isOneShot = false;
+    s.sunOffsetMinutes = offsetMinutes;
+    return s;
+}
+
+Schedule Schedule::moonPhaseAngle(int angleDegrees, int toleranceDegrees) {
+    Schedule s;
+    s.kind = ScheduleKind::MoonPhaseAngle;
+    s.isOneShot = false;
+    s.moonPhaseAngleDegrees = angleDegrees;
+    s.moonPhaseToleranceDegrees = toleranceDegrees;
+    return s;
+}
+
+Schedule Schedule::moonPhase(MoonPhaseName name, int toleranceDegrees) {
+    return moonPhaseAngle(moonPhaseAngleForName(name), toleranceDegrees);
+}
+
+Schedule Schedule::moonIlluminationPercent(double percent, double tolerancePercent) {
+    Schedule s;
+    s.kind = ScheduleKind::MoonIlluminationPercent;
+    s.isOneShot = false;
+    s.moonIlluminationTargetPercent = percent;
+    s.moonIlluminationTolerancePercent = tolerancePercent;
+    return s;
+}
+
 Schedule Schedule::custom(const ScheduleField& minute,
                           const ScheduleField& hour,
                           const ScheduleField& dom,
                           const ScheduleField& month,
                           const ScheduleField& dow) {
     Schedule s;
+    s.kind = ScheduleKind::Cron;
+    s.isOneShot = false;
     s.minute = minute;
     s.hour = hour;
     s.dayOfMonth = dom;
@@ -317,15 +594,36 @@ uint64_t ESPScheduler::allowedMask(int min, int max) const {
 }
 
 bool ESPScheduler::validateSchedule(const Schedule& schedule) const {
-    if (schedule.isOneShot) {
-        return true;
+    const ScheduleKind kind = resolvedScheduleKind(schedule);
+    switch (kind) {
+        case ScheduleKind::OneShotUtc:
+            return true;
+        case ScheduleKind::Cron: {
+            const bool minuteOk = fieldWithinRange(schedule.minute, 0, 59);
+            const bool hourOk = fieldWithinRange(schedule.hour, 0, 23);
+            const bool domOk = fieldWithinRange(schedule.dayOfMonth, 1, 31);
+            const bool monthOk = fieldWithinRange(schedule.month, 1, 12);
+            const bool dowOk = fieldWithinRange(schedule.dayOfWeek, 0, 6);
+            return minuteOk && hourOk && domOk && monthOk && dowOk;
+        }
+        case ScheduleKind::Sunrise:
+        case ScheduleKind::Sunset:
+            return schedule.sunOffsetMinutes >= kMinSunOffsetMinutes && schedule.sunOffsetMinutes <= kMaxSunOffsetMinutes;
+        case ScheduleKind::MoonPhaseAngle:
+            return schedule.moonPhaseAngleDegrees >= kMinMoonPhaseAngle &&
+                   schedule.moonPhaseAngleDegrees <= kMaxMoonPhaseAngle &&
+                   schedule.moonPhaseToleranceDegrees >= 0 &&
+                   schedule.moonPhaseToleranceDegrees <= kMaxMoonPhaseTolerance;
+        case ScheduleKind::MoonIlluminationPercent:
+            return std::isfinite(schedule.moonIlluminationTargetPercent) &&
+                   std::isfinite(schedule.moonIlluminationTolerancePercent) &&
+                   schedule.moonIlluminationTargetPercent >= kMinIlluminationPercent &&
+                   schedule.moonIlluminationTargetPercent <= kMaxIlluminationPercent &&
+                   schedule.moonIlluminationTolerancePercent > 0.0 &&
+                   schedule.moonIlluminationTolerancePercent <= kMaxIlluminationTolerancePercent;
+        default:
+            return false;
     }
-    const bool minuteOk = fieldWithinRange(schedule.minute, 0, 59);
-    const bool hourOk = fieldWithinRange(schedule.hour, 0, 23);
-    const bool domOk = fieldWithinRange(schedule.dayOfMonth, 1, 31);
-    const bool monthOk = fieldWithinRange(schedule.month, 1, 12);
-    const bool dowOk = fieldWithinRange(schedule.dayOfWeek, 0, 6);
-    return minuteOk && hourOk && domOk && monthOk && dowOk;
 }
 
 uint32_t ESPScheduler::addJobOnceUtc(const DateTime& whenUtc,
@@ -531,7 +829,7 @@ void ESPScheduler::tick(const DateTime& nowUtc) {
             continue;
         }
         if (!job.hasNext) {
-            if (job.schedule.isOneShot) {
+            if (isOneShotSchedule(job.schedule)) {
                 job.nextRunUtc = job.schedule.onceAtUtc;
                 job.hasNext = true;
             } else {
@@ -547,7 +845,7 @@ void ESPScheduler::tick(const DateTime& nowUtc) {
             continue;
         }
         job.callback(job.userData);
-        if (job.schedule.isOneShot) {
+        if (isOneShotSchedule(job.schedule)) {
             job.finished = true;
             continue;
         }
@@ -584,7 +882,7 @@ bool ESPScheduler::getJobInfo(size_t index, JobInfo& out) const {
             outNext = storedNext;
             return;
         }
-        if (schedule.isOneShot) {
+        if (isOneShotSchedule(schedule)) {
             outNext = schedule.onceAtUtc;
             return;
         }
@@ -653,7 +951,7 @@ void ESPScheduler::runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx) {
             continue;
         }
         if (!ctx->hasNext) {
-            if (ctx->schedule.isOneShot) {
+            if (isOneShotSchedule(ctx->schedule)) {
                 ctx->nextRunUtc = ctx->schedule.onceAtUtc;
                 ctx->hasNext = true;
             } else {
@@ -678,7 +976,7 @@ void ESPScheduler::runWorkerJob(const std::shared_ptr<WorkerJobContext>& ctx) {
 
         ctx->callback(ctx->userData);
 
-        if (ctx->schedule.isOneShot) {
+        if (isOneShotSchedule(ctx->schedule)) {
             break;
         }
         DateTime from = date.addMinutes(ctx->nextRunUtc, 1);
