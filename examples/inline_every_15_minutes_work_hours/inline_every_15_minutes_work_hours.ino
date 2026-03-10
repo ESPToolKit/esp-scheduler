@@ -17,12 +17,12 @@ void setup() {
 
 	// Useful for periodic checks while staff is active.
 	Schedule schedule = Schedule::custom(
-		ScheduleField::every(15), // minute: 0,15,30,45
-		ScheduleField::range(9, 17),
-		ScheduleField::any(),
-		ScheduleField::any(),
-		ScheduleField::any()
-  );
+	    ScheduleField::every(15), // minute: 0,15,30,45
+	    ScheduleField::range(9, 17),
+	    ScheduleField::any(),
+	    ScheduleField::any(),
+	    ScheduleField::any()
+	);
 
 	scheduler.addJob(schedule, SchedulerJobMode::Inline, &workHoursPulse, nullptr);
 }

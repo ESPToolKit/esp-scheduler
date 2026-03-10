@@ -339,6 +339,13 @@ Example sketches in this repo:
 - Host-side CTest is intentionally skipped because the scheduler relies on ESP32 FreeRTOS and ESPDate wall-clock helpers.
 - CI also compiles all examples through PlatformIO and Arduino CLI across ESP32, S3, C3, and P4 boards.
 
+## Formatting Baseline
+
+This repository follows the firmware formatting baseline from `esptoolkit-template`:
+- `.clang-format` is the source of truth for C/C++/INO layout.
+- `.editorconfig` enforces tabs (`tab_width = 4`), LF endings, and final newline.
+- Format all tracked firmware sources with `bash scripts/format_cpp.sh`.
+
 ## License
 MIT — see `LICENSE.md`.
 

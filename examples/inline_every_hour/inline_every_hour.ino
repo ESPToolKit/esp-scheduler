@@ -17,12 +17,12 @@ void setup() {
 
 	// Fires at HH:00 every day.
 	Schedule schedule = Schedule::custom(
-		ScheduleField::only(0), // minute
-		ScheduleField::any(),	  // hour
-		ScheduleField::any(),	  // day of month
-		ScheduleField::any(),	  // month
-		ScheduleField::any()    // day of week
-  );
+	    ScheduleField::only(0), // minute
+	    ScheduleField::any(),   // hour
+	    ScheduleField::any(),   // day of month
+	    ScheduleField::any(),   // month
+	    ScheduleField::any()    // day of week
+	);
 
 	scheduler.addJob(schedule, SchedulerJobMode::Inline, &everyHour, nullptr);
 }

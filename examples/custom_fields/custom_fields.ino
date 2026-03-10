@@ -18,19 +18,15 @@ void setup() {
 
 	int weekdays[] = {1, 3, 5}; // Mon, Wed, Fri (0 = Sun)
 	Schedule custom = Schedule::custom(
-		ScheduleField::every(5),		 // every 5 minutes
-		ScheduleField::range(9, 17),	 // during hours 9..17
-		ScheduleField::any(),			 // any day of month
-		ScheduleField::any(),			 // any month
-		ScheduleField::list(weekdays, 3) // selected weekdays
+	    ScheduleField::every(5),         // every 5 minutes
+	    ScheduleField::range(9, 17),     // during hours 9..17
+	    ScheduleField::any(),            // any day of month
+	    ScheduleField::any(),            // any month
+	    ScheduleField::list(weekdays, 3) // selected weekdays
 	);
 
-	scheduler.addJob(
-		custom,
-		SchedulerJobMode::Inline,
-		&customInline,
-		(void *)"MWF 9-17 every 5min"
-  );
+	scheduler
+	    .addJob(custom, SchedulerJobMode::Inline, &customInline, (void *)"MWF 9-17 every 5min");
 }
 
 void loop() {

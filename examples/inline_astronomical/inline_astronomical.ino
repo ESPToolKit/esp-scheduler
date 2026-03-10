@@ -28,29 +28,25 @@ void setup() {
 
 	scheduler.setMinValidUtc(date.fromUtc(2020, 1, 1, 0, 0, 0));
 
+	scheduler
+	    .addJob(Schedule::sunrise(), SchedulerJobMode::Inline, &astroCallback, (void *)"sunrise");
 	scheduler.addJob(
-		Schedule::sunrise(),
-		SchedulerJobMode::Inline,
-		&astroCallback,
-		(void *)"sunrise"
+	    Schedule::sunset(15),
+	    SchedulerJobMode::Inline,
+	    &astroCallback,
+	    (void *)"sunset +15m"
 	);
 	scheduler.addJob(
-		Schedule::sunset(15),
-		SchedulerJobMode::Inline,
-		&astroCallback,
-		(void *)"sunset +15m"
+	    Schedule::moonPhase(MoonPhaseName::LastQuarter, 2),
+	    SchedulerJobMode::Inline,
+	    &astroCallback,
+	    (void *)"last quarter"
 	);
 	scheduler.addJob(
-		Schedule::moonPhase(MoonPhaseName::LastQuarter, 2),
-		SchedulerJobMode::Inline,
-		&astroCallback,
-		(void *)"last quarter"
-	);
-	scheduler.addJob(
-		Schedule::moonIlluminationPercent(75.0, 0.5),
-		SchedulerJobMode::Inline,
-		&astroCallback,
-		(void *)"illumination 75%"
+	    Schedule::moonIlluminationPercent(75.0, 0.5),
+	    SchedulerJobMode::Inline,
+	    &astroCallback,
+	    (void *)"illumination 75%"
 	);
 }
 
