@@ -17,11 +17,11 @@ void setup() {
 
 	int selectedDays[] = {2, 4, 6}; // Tue, Thu, Sat
 	Schedule schedule = Schedule::custom(
-		ScheduleField::only(0),				 // minute
-		ScheduleField::any(),				 // hour
-		ScheduleField::any(),				 // day of month
-		ScheduleField::any(),				 // month
-		ScheduleField::list(selectedDays, 3) // day of week
+	    ScheduleField::only(0),              // minute
+	    ScheduleField::any(),                // hour
+	    ScheduleField::any(),                // day of month
+	    ScheduleField::any(),                // month
+	    ScheduleField::list(selectedDays, 3) // day of week
 	);
 
 	scheduler.addJob(schedule, SchedulerJobMode::Inline, &hourOnSelectedDays, nullptr);

@@ -16,12 +16,12 @@ void setup() {
 	Serial.println("ESPScheduler inline every-minute example");
 
 	Schedule schedule = Schedule::custom(
-		ScheduleField::every(1),  // minute
-		ScheduleField::any(),	    // hour
-		ScheduleField::any(),	    // day of month
-		ScheduleField::any(),	    // month
-		ScheduleField::any()      // day of week
-  );
+	    ScheduleField::every(1), // minute
+	    ScheduleField::any(),    // hour
+	    ScheduleField::any(),    // day of month
+	    ScheduleField::any(),    // month
+	    ScheduleField::any()     // day of week
+	);
 
 	scheduler.addJob(schedule, SchedulerJobMode::Inline, &everyMinute, nullptr);
 }

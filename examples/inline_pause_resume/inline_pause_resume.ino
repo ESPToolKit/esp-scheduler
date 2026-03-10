@@ -19,12 +19,12 @@ void setup() {
 
 	// Every minute (all hours/days) using custom cron fields
 	Schedule everyMinute = Schedule::custom(
-		ScheduleField::every(1),  // minute
-		ScheduleField::any(),	    // hour
-		ScheduleField::any(),	    // day of month
-		ScheduleField::any(),	    // month
-		ScheduleField::any()      // day of week
-  );
+	    ScheduleField::every(1), // minute
+	    ScheduleField::any(),    // hour
+	    ScheduleField::any(),    // day of month
+	    ScheduleField::any(),    // month
+	    ScheduleField::any()     // day of week
+	);
 
 	jobId = scheduler.addJob(everyMinute, SchedulerJobMode::Inline, &recurringInline, nullptr);
 }

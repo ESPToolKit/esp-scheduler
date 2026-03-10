@@ -26,12 +26,12 @@ void setup() {
 	cfg.usePsramStack = true;
 
 	scheduler.addJob(
-		Schedule::weeklyAtLocal(weekdaysMask, 18, 30),
-		SchedulerJobMode::WorkerTask,
-		&weeklyReport,
-		nullptr,
-		&cfg
-  );
+	    Schedule::weeklyAtLocal(weekdaysMask, 18, 30),
+	    SchedulerJobMode::WorkerTask,
+	    &weeklyReport,
+	    nullptr,
+	    &cfg
+	);
 }
 
 void loop() {
