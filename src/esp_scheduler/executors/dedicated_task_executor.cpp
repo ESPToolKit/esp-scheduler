@@ -3,6 +3,7 @@
 #include <new>
 
 #include "../service/scheduler_events.h"
+#include "task_support.h"
 
 namespace {
 bool postCompletion(const std::shared_ptr<SchedulerExecutorRuntime> &runtime, uint32_t jobId, uint32_t generation) {
@@ -19,6 +20,7 @@ bool postCompletion(const std::shared_ptr<SchedulerExecutorRuntime> &runtime, ui
 
 struct DedicatedTaskExecutor::TaskContext {
 	JobInvocation invocation{};
+	bool createdWithCaps = false;
 };
 
 bool DedicatedTaskExecutor::begin(const std::shared_ptr<SchedulerExecutorRuntime> &runtime) {
@@ -41,14 +43,16 @@ bool DedicatedTaskExecutor::submit(const JobInvocation &invocation) {
 
 	TaskHandle_t handle = nullptr;
 	const DedicatedTaskOptions &task = invocation.dedicatedTask;
-	const BaseType_t created = xTaskCreatePinnedToCore(
+	const BaseType_t created = scheduler_task_support::createTaskPinned(
 	    &DedicatedTaskExecutor::taskEntry,
 	    task.name ? task.name : "sched-task",
 	    task.stackSize,
 	    context,
 	    task.priority,
 	    &handle,
-	    task.coreId
+	    task.coreId,
+	    task.usePsramStack,
+	    context->createdWithCaps
 	);
 	if (created != pdPASS || handle == nullptr) {
 		delete context;
@@ -70,6 +74,7 @@ void DedicatedTaskExecutor::taskEntry(void *arg) {
 
 	context->invocation.callback.invoke();
 	postCompletion(context->invocation.runtime, context->invocation.jobId, context->invocation.generation);
+	const bool createdWithCaps = context->createdWithCaps;
 	delete context;
-	vTaskDelete(nullptr);
+	scheduler_task_support::deleteCurrentTask(createdWithCaps);
 }

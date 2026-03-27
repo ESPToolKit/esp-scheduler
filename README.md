@@ -23,7 +23,9 @@ ESPScheduler v2 is a C++17 scheduler for ESP32 firmware that keeps the cron-styl
 - Built-in worker-pool executor, dedicated-task executor, and `ESPWorkerExecutorAdapter`.
 - Deterministic lifecycle with `begin()` / `end()`.
 - Clock validity guard via `setMinValidUnixSeconds()` / `setMinValidUtc()`.
-- Arduino / ESP-IDF friendly metadata and device tests.
+- `usePSRAMMetadata` routes scheduler-owned job metadata, slot storage, and due-heap buffers through the scheduler allocator.
+- `usePsramStack` is honored for the scheduler service task, worker-pool workers, and dedicated-task jobs when the target supports external task stacks.
+- Arduino / ESP-IDF friendly metadata handling, branch-push CI builds, and device tests.
 
 ## Install
 - PlatformIO:
@@ -154,6 +156,12 @@ options.dedicatedTask = &task;
 - `ESPWorkerExecutorAdapter`: bridges to an existing `ESPWorker`.
 - `DedicatedTaskExecutor`: advanced opt-in path, also used by the v1 compatibility wrapper for per-job task config.
 
+## Memory And Shutdown Notes
+- Scheduler-owned runtime metadata now uses explicit non-throwing allocation paths and reports `SchedulerError::NoMemory` on API paths that can fail cleanly.
+- Queue submission in background mode returns `QueueFull` if the command queue has no space; `Timeout` is reserved for commands that were accepted but not acknowledged within the control timeout.
+- `end(false)` stops intake, detaches completion routing, and tears down scheduler-owned resources without waiting for async callbacks to finish posting back into the core.
+- `end(true)` cancels pending work, drains active async completions, then stops executors and the background service.
+
 ## Time Semantics
 - Recurring schedules are evaluated in local time.
 - One-shot UTC schedules stay exact.
@@ -167,8 +175,9 @@ options.dedicatedTask = &task;
 - `examples/v2_espworker_adapter`
 - `examples/v2_shutdown`
 - `examples/v1_compat_wrapper`
+- `examples/v2_api_compile` for CI coverage of the native v2 API surface
 
-The older v1-style sketches are still present and routed through `ESPSchedulerV1Compat`.
+The older v1-style sketches are still present and routed through `ESPSchedulerV1Compat`. That wrapper is migration support, not the primary API.
 
 ## v1 Compatibility
 `ESPSchedulerV1Compat` preserves the old shape:
@@ -179,7 +188,9 @@ The older v1-style sketches are still present and routed through `ESPSchedulerV1
 
 ## Testing
 - Device Unity tests live under `test/test_esp_scheduler`.
-- CI builds all examples with PlatformIO and Arduino CLI.
+- CI runs on pushes, pull requests, and workflow dispatch.
+- PlatformIO CI is split into v2 API compile coverage, example builds, and device test sketch builds.
+- Arduino CLI CI separately compiles the v2 API sketch and the example set.
 
 ## License
 ESPScheduler is released under the [MIT License](LICENSE.md).

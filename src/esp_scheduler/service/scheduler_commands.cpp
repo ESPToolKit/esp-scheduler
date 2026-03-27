@@ -24,6 +24,14 @@ void SchedulerServiceCommand::signal() {
 	}
 }
 
+void SchedulerServiceCommand::abandon() {
+	abandoned_.store(true, std::memory_order_release);
+}
+
+bool SchedulerServiceCommand::abandoned() const {
+	return abandoned_.load(std::memory_order_acquire);
+}
+
 void AddJobCommand::execute(SchedulerCore &core, ESPDate &date, IExecutorResolver &executors) {
 	(void)executors;
 	result = core.addJob(schedule, options, callback, date.now());
@@ -72,4 +80,5 @@ void SetMinValidCommand::execute(SchedulerCore &core, ESPDate &date, IExecutorRe
 	(void)date;
 	(void)executors;
 	core.setMinValidUnixSeconds(minEpochSeconds);
+	result = SchedulerResult<void>::success();
 }

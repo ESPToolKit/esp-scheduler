@@ -1,10 +1,12 @@
 #pragma once
 
-#include <string>
-
 #include "../executors/scheduler_executor.h"
+#include "runtime_containers.h"
 
 struct JobRecord {
+	explicit JobRecord(bool usePSRAMMetadata = false) : name(usePSRAMMetadata) {
+	}
+
 	uint32_t id = 0;
 	uint32_t generation = 1;
 	bool occupied = false;
@@ -22,7 +24,7 @@ struct JobRecord {
 
 	DateTime nextRunUtc{};
 	CallbackRef callback{};
-	std::string name{};
+	SchedulerOwnedString name{};
 	DedicatedTaskOptions dedicatedTask{};
 	bool hasDedicatedTaskOptions = false;
 };

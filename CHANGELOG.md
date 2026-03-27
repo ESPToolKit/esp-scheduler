@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format follows Keep a Changelog and the project adheres to Semantic Versioning.
 
 ## [Unreleased]
+### Added
+- Compile-only `examples/v2_api_compile` sketch to exercise the native v2 API surface in CI.
+- Lifecycle and overlap coverage in the Unity test sketch for skip, queue-one, allow-parallel, background no-`tick()`, explicit shutdown, and v1 compatibility cleanup behavior.
+
+### Changed
+- CI now runs on every branch push and is split into PlatformIO v2 API builds, PlatformIO example builds, PlatformIO device test sketch builds, Arduino CLI v2 API builds, and Arduino CLI example builds.
+- Background command submission now treats a full control queue as `QueueFull` immediately instead of waiting for the control timeout window.
+
+### Fixed
+- Scheduler reschedule paths now clear `hasNext` if a due-heap insertion fails, so jobs are retried on the next dispatch pass instead of getting stuck in a primed-but-undispatchable state.
+- PSRAM task-stack flags are now honored by the scheduler service task, worker-pool executor, and dedicated-task executor when the platform supports external task stacks.
 
 ## [2.0.0] - 2026-03-27
 ### Added

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "../core/scheduler_core.h"
 
 extern "C" {
@@ -14,12 +16,15 @@ class SchedulerServiceCommand {
 
 	bool wait(uint32_t timeoutMs);
 	void signal();
+	void abandon();
+	bool abandoned() const;
 
 	virtual void execute(SchedulerCore &core, ESPDate &date, IExecutorResolver &executors) = 0;
 
   private:
 	SemaphoreHandle_t completion_ = nullptr;
 	StaticSemaphore_t completionBuffer_{};
+	std::atomic<bool> abandoned_{false};
 };
 
 class AddJobCommand : public SchedulerServiceCommand {
@@ -87,6 +92,7 @@ class GetJobInfoCommand : public SchedulerServiceCommand {
 class SetMinValidCommand : public SchedulerServiceCommand {
   public:
 	int64_t minEpochSeconds = 0;
+	SchedulerResult<void> result = SchedulerResult<void>::failure(SchedulerError::NotInitialized);
 
 	void execute(SchedulerCore &core, ESPDate &date, IExecutorResolver &executors) override;
 };

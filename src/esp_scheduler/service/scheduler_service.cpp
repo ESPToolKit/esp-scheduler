@@ -2,6 +2,8 @@
 
 #include <new>
 
+#include "../executors/task_support.h"
+
 namespace {
 constexpr uint32_t kIdlePollMs = 1000;
 }
@@ -10,9 +12,13 @@ SchedulerService::SchedulerService(
     ESPDate &date,
     const SchedulerServiceConfig &config,
     int64_t minValidEpochSeconds,
+    bool usePSRAMMetadata,
     IExecutorResolver &executors
 )
-    : date_(date), config_(config), core_(date, minValidEpochSeconds), executors_(executors) {
+    : date_(date),
+      config_(config),
+      core_(date, minValidEpochSeconds, usePSRAMMetadata),
+      executors_(executors) {
 }
 
 SchedulerService::~SchedulerService() {
@@ -39,19 +45,23 @@ bool SchedulerService::begin() {
 	xQueueAddToSet(commandQueue_, queueSet_);
 	xQueueAddToSet(eventQueue_, queueSet_);
 
-	const BaseType_t created = xTaskCreatePinnedToCore(
+	bool createdWithCaps = false;
+	const BaseType_t created = scheduler_task_support::createTaskPinned(
 	    &SchedulerService::taskEntry,
 	    "sched-svc",
 	    config_.taskStackSize,
 	    this,
 	    config_.taskPriority,
 	    &task_,
-	    config_.coreId
+	    config_.coreId,
+	    config_.usePsramStack,
+	    createdWithCaps
 	);
 	if (created != pdPASS || task_ == nullptr) {
 		stop();
 		return false;
 	}
+	taskCreatedWithCaps_ = createdWithCaps;
 
 	started_.store(true);
 	return true;
@@ -75,13 +85,29 @@ void SchedulerService::stop() {
 	}
 
 	if (task_ && !taskExited_.load()) {
-		vTaskDelete(task_);
+		scheduler_task_support::deleteTask(task_, taskCreatedWithCaps_);
 	}
 	task_ = nullptr;
+	taskCreatedWithCaps_ = false;
 
 	if (queueSet_) {
 		vQueueDelete(queueSet_);
 		queueSet_ = nullptr;
+	}
+	if (commandQueue_) {
+		while (true) {
+			SchedulerServiceCommand *pending = nullptr;
+			if (xQueueReceive(commandQueue_, &pending, 0) != pdTRUE) {
+				break;
+			}
+			if (!pending) {
+				continue;
+			}
+			pending->signal();
+			if (pending->abandoned()) {
+				delete pending;
+			}
+		}
 	}
 	if (commandQueue_) {
 		vQueueDelete(commandQueue_);
@@ -97,12 +123,11 @@ void SchedulerService::stop() {
 	started_.store(false);
 }
 
-bool SchedulerService::send(SchedulerServiceCommand &command) {
+bool SchedulerService::send(SchedulerServiceCommand *command) {
 	if (!commandQueue_) {
 		return false;
 	}
-	SchedulerServiceCommand *pointer = &command;
-	return xQueueSend(commandQueue_, &pointer, pdMS_TO_TICKS(config_.controlTimeoutMs)) == pdTRUE;
+	return xQueueSend(commandQueue_, &command, 0) == pdTRUE;
 }
 
 void SchedulerService::taskEntry(void *arg) {
@@ -114,7 +139,7 @@ void SchedulerService::taskEntry(void *arg) {
 	service->run();
 	service->taskExited_.store(true);
 	service->task_ = nullptr;
-	vTaskDelete(nullptr);
+	scheduler_task_support::deleteCurrentTask(service->taskCreatedWithCaps_);
 }
 
 void SchedulerService::drainCommands() {
@@ -131,6 +156,9 @@ void SchedulerService::drainCommands() {
 		}
 		command->execute(core_, date_, executors_);
 		command->signal();
+		if (command->abandoned()) {
+			delete command;
+		}
 	}
 }
 

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <atomic>
-#include <vector>
 
+#include "../core/runtime_containers.h"
 #include "scheduler_executor.h"
 
 class WorkerPoolExecutor : public ISchedulerExecutor {
@@ -18,13 +18,17 @@ class WorkerPoolExecutor : public ISchedulerExecutor {
   private:
 	struct TaskItem;
 	struct WorkerContext;
+	struct WorkerHandle {
+		TaskHandle_t task = nullptr;
+		bool createdWithCaps = false;
+	};
 
 	static void workerTaskEntry(void *arg);
 
 	WorkerPoolConfig config_{};
 	std::shared_ptr<SchedulerExecutorRuntime> runtime_{};
 	QueueHandle_t queue_ = nullptr;
-	std::vector<TaskHandle_t> workers_{};
+	SchedulerArray<WorkerHandle> workers_{};
 	std::atomic<bool> started_{false};
 	std::atomic<int> workersRunning_{0};
 };

@@ -2,10 +2,11 @@
 
 #include <new>
 #include <utility>
-#include <vector>
 
 #include "core/scheduler_core.h"
+#include "core/runtime_containers.h"
 #include "executors/dedicated_task_executor.h"
+#include "executors/inline_executor.h"
 #include "executors/worker_pool_executor.h"
 #include "service/scheduler_commands.h"
 #include "service/scheduler_service.h"
@@ -14,9 +15,41 @@ extern "C" {
 #include "freertos/queue.h"
 }
 
+namespace {
+template <typename TCommand, typename TResult, typename FBuild>
+TResult executeBackgroundCommand(
+    SchedulerService &service,
+    uint32_t timeoutMs,
+    SchedulerError queueError,
+    SchedulerError timeoutError,
+    FBuild &&build
+) {
+	TCommand *command = new (std::nothrow) TCommand();
+	if (!command) {
+		return TResult::failure(SchedulerError::NoMemory);
+	}
+	build(*command);
+	if (!service.send(command)) {
+		delete command;
+		return TResult::failure(queueError);
+	}
+	if (!command->wait(timeoutMs)) {
+		command->abandon();
+		return TResult::failure(timeoutError);
+	}
+	TResult result = command->result;
+	delete command;
+	return result;
+}
+} // namespace
+
 struct ESPScheduler::Impl : public IExecutorResolver {
 	explicit Impl(ESPDate &date, const SchedulerConfig &config)
-	    : date(date), config(config), manualCore(date, config.minValidEpochSeconds) {
+	    : date(date),
+	      config(config),
+	      manualCore(date, config.minValidEpochSeconds, config.usePSRAMMetadata),
+	      externalExecutors(config.usePSRAMMetadata),
+	      executors(config.usePSRAMMetadata) {
 	}
 
 	~Impl() {
@@ -24,6 +57,10 @@ struct ESPScheduler::Impl : public IExecutorResolver {
 			vQueueDelete(eventQueue);
 			eventQueue = nullptr;
 		}
+	}
+
+	ISchedulerExecutor *inlineExecutor() override {
+		return inlineDispatch.get();
 	}
 
 	ISchedulerExecutor *executorFor(uint8_t executorId) override {
@@ -34,20 +71,31 @@ struct ESPScheduler::Impl : public IExecutorResolver {
 	}
 
 	bool startExecutors() {
+		inlineDispatch.reset(new (std::nothrow) InlineExecutor());
 		workerPool.reset(new (std::nothrow) WorkerPoolExecutor(config.defaultWorkerPool));
 		dedicatedTask.reset(new (std::nothrow) DedicatedTaskExecutor());
-		if (!workerPool || !dedicatedTask) {
+		if (!inlineDispatch || !workerPool || !dedicatedTask) {
+			return false;
+		}
+		if (!inlineDispatch->begin(runtime)) {
 			return false;
 		}
 
 		executors.clear();
-		executors.push_back(workerPool.get());
-		executors.push_back(dedicatedTask.get());
-		for (ISchedulerExecutor *executor : externalExecutors) {
-			executors.push_back(executor);
+		if (!executors.pushBack(workerPool.get())) {
+			return false;
+		}
+		if (!executors.pushBack(dedicatedTask.get())) {
+			return false;
+		}
+		for (size_t index = 0; index < externalExecutors.size(); ++index) {
+			if (!executors.pushBack(externalExecutors[index])) {
+				return false;
+			}
 		}
 
-		for (ISchedulerExecutor *executor : executors) {
+		for (size_t index = 0; index < executors.size(); ++index) {
+			ISchedulerExecutor *executor = executors[index];
 			if (!executor || !executor->begin(runtime)) {
 				return false;
 			}
@@ -56,12 +104,17 @@ struct ESPScheduler::Impl : public IExecutorResolver {
 	}
 
 	void stopExecutors(bool drainRunningJobs) {
-		for (ISchedulerExecutor *executor : executors) {
+		for (size_t index = 0; index < executors.size(); ++index) {
+			ISchedulerExecutor *executor = executors[index];
 			if (executor) {
 				executor->end(drainRunningJobs);
 			}
 		}
 		executors.clear();
+		if (inlineDispatch) {
+			inlineDispatch->end(drainRunningJobs);
+		}
+		inlineDispatch.reset();
 		dedicatedTask.reset();
 		workerPool.reset();
 	}
@@ -83,10 +136,11 @@ struct ESPScheduler::Impl : public IExecutorResolver {
 	SchedulerConfig config{};
 	SchedulerCore manualCore;
 	std::unique_ptr<SchedulerService> service{};
+	std::unique_ptr<InlineExecutor> inlineDispatch{};
 	std::unique_ptr<WorkerPoolExecutor> workerPool{};
 	std::unique_ptr<DedicatedTaskExecutor> dedicatedTask{};
-	std::vector<ISchedulerExecutor *> externalExecutors{};
-	std::vector<ISchedulerExecutor *> executors{};
+	SchedulerArray<ISchedulerExecutor *> externalExecutors{};
+	SchedulerArray<ISchedulerExecutor *> executors{};
 	std::shared_ptr<SchedulerExecutorRuntime> runtime{};
 	QueueHandle_t eventQueue = nullptr;
 	bool started = false;
@@ -119,6 +173,7 @@ bool ESPScheduler::begin() {
 		    impl_->date,
 		    impl_->config.service,
 		    impl_->config.minValidEpochSeconds,
+		    impl_->config.usePSRAMMetadata,
 		    *impl_
 		));
 		if (!impl_->service || !impl_->service->begin()) {
@@ -157,10 +212,13 @@ void ESPScheduler::end(bool waitForRunningJobs, uint32_t timeoutMs) {
 	impl_->draining = true;
 
 	if (impl_->config.mode == SchedulerMode::Background && impl_->service) {
-		CancelAllCommand cancelCommand;
-		if (impl_->service->send(cancelCommand)) {
-			cancelCommand.wait(impl_->config.service.controlTimeoutMs);
-		}
+		executeBackgroundCommand<CancelAllCommand, SchedulerResult<void>>(
+		    *impl_->service,
+		    impl_->config.service.controlTimeoutMs,
+		    SchedulerError::QueueFull,
+		    SchedulerError::Timeout,
+		    [](CancelAllCommand &) {}
+		);
 
 		if (waitForRunningJobs) {
 			const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeoutMs);
@@ -226,7 +284,9 @@ SchedulerResult<uint8_t> ESPScheduler::registerExecutor(ISchedulerExecutor *exec
 		return SchedulerResult<uint8_t>::failure(SchedulerError::Busy);
 	}
 	const uint8_t executorId = static_cast<uint8_t>(2 + impl_->externalExecutors.size());
-	impl_->externalExecutors.push_back(executor);
+	if (!impl_->externalExecutors.pushBack(executor)) {
+		return SchedulerResult<uint8_t>::failure(SchedulerError::NoMemory);
+	}
 	return SchedulerResult<uint8_t>::success(executorId);
 }
 
@@ -316,21 +376,21 @@ SchedulerResult<uint32_t> ESPScheduler::addJobImpl(
 	}
 
 	if (impl_->config.mode == SchedulerMode::Background && impl_->service) {
-		AddJobCommand command;
-		command.schedule = schedule;
-		command.options = options;
-		if (options.dedicatedTask) {
-			command.dedicatedTaskCopy = *options.dedicatedTask;
-			command.options.dedicatedTask = &command.dedicatedTaskCopy;
-		}
-		command.callback = callback;
-		if (!impl_->service->send(command)) {
-			return SchedulerResult<uint32_t>::failure(SchedulerError::QueueFull);
-		}
-		if (!command.wait(impl_->config.service.controlTimeoutMs)) {
-			return SchedulerResult<uint32_t>::failure(SchedulerError::Timeout);
-		}
-		return command.result;
+		return executeBackgroundCommand<AddJobCommand, SchedulerResult<uint32_t>>(
+		    *impl_->service,
+		    impl_->config.service.controlTimeoutMs,
+		    SchedulerError::QueueFull,
+		    SchedulerError::Timeout,
+		    [&](AddJobCommand &command) {
+			    command.schedule = schedule;
+			    command.options = options;
+			    if (options.dedicatedTask) {
+				    command.dedicatedTaskCopy = *options.dedicatedTask;
+				    command.options.dedicatedTask = &command.dedicatedTaskCopy;
+			    }
+			    command.callback = callback;
+		    }
+		);
 	}
 
 	return impl_->manualCore.addJob(schedule, options, callback, impl_->date.now());
@@ -341,15 +401,13 @@ SchedulerResult<void> ESPScheduler::cancelJob(uint32_t jobId) {
 		return SchedulerResult<void>::failure(SchedulerError::NotInitialized);
 	}
 	if (impl_->config.mode == SchedulerMode::Background && impl_->service) {
-		CancelJobCommand command;
-		command.jobId = jobId;
-		if (!impl_->service->send(command)) {
-			return SchedulerResult<void>::failure(SchedulerError::QueueFull);
-		}
-		if (!command.wait(impl_->config.service.controlTimeoutMs)) {
-			return SchedulerResult<void>::failure(SchedulerError::Timeout);
-		}
-		return command.result;
+		return executeBackgroundCommand<CancelJobCommand, SchedulerResult<void>>(
+		    *impl_->service,
+		    impl_->config.service.controlTimeoutMs,
+		    SchedulerError::QueueFull,
+		    SchedulerError::Timeout,
+		    [&](CancelJobCommand &command) { command.jobId = jobId; }
+		);
 	}
 	return impl_->manualCore.cancelJob(jobId);
 }
@@ -359,15 +417,13 @@ SchedulerResult<void> ESPScheduler::pauseJob(uint32_t jobId) {
 		return SchedulerResult<void>::failure(SchedulerError::NotInitialized);
 	}
 	if (impl_->config.mode == SchedulerMode::Background && impl_->service) {
-		PauseJobCommand command;
-		command.jobId = jobId;
-		if (!impl_->service->send(command)) {
-			return SchedulerResult<void>::failure(SchedulerError::QueueFull);
-		}
-		if (!command.wait(impl_->config.service.controlTimeoutMs)) {
-			return SchedulerResult<void>::failure(SchedulerError::Timeout);
-		}
-		return command.result;
+		return executeBackgroundCommand<PauseJobCommand, SchedulerResult<void>>(
+		    *impl_->service,
+		    impl_->config.service.controlTimeoutMs,
+		    SchedulerError::QueueFull,
+		    SchedulerError::Timeout,
+		    [&](PauseJobCommand &command) { command.jobId = jobId; }
+		);
 	}
 	return impl_->manualCore.pauseJob(jobId);
 }
@@ -377,15 +433,13 @@ SchedulerResult<void> ESPScheduler::resumeJob(uint32_t jobId) {
 		return SchedulerResult<void>::failure(SchedulerError::NotInitialized);
 	}
 	if (impl_->config.mode == SchedulerMode::Background && impl_->service) {
-		ResumeJobCommand command;
-		command.jobId = jobId;
-		if (!impl_->service->send(command)) {
-			return SchedulerResult<void>::failure(SchedulerError::QueueFull);
-		}
-		if (!command.wait(impl_->config.service.controlTimeoutMs)) {
-			return SchedulerResult<void>::failure(SchedulerError::Timeout);
-		}
-		return command.result;
+		return executeBackgroundCommand<ResumeJobCommand, SchedulerResult<void>>(
+		    *impl_->service,
+		    impl_->config.service.controlTimeoutMs,
+		    SchedulerError::QueueFull,
+		    SchedulerError::Timeout,
+		    [&](ResumeJobCommand &command) { command.jobId = jobId; }
+		);
 	}
 	return impl_->manualCore.resumeJob(jobId, impl_->date.now());
 }
@@ -395,14 +449,13 @@ SchedulerResult<void> ESPScheduler::cancelAll() {
 		return SchedulerResult<void>::failure(SchedulerError::NotInitialized);
 	}
 	if (impl_->config.mode == SchedulerMode::Background && impl_->service) {
-		CancelAllCommand command;
-		if (!impl_->service->send(command)) {
-			return SchedulerResult<void>::failure(SchedulerError::QueueFull);
-		}
-		if (!command.wait(impl_->config.service.controlTimeoutMs)) {
-			return SchedulerResult<void>::failure(SchedulerError::Timeout);
-		}
-		return command.result;
+		return executeBackgroundCommand<CancelAllCommand, SchedulerResult<void>>(
+		    *impl_->service,
+		    impl_->config.service.controlTimeoutMs,
+		    SchedulerError::QueueFull,
+		    SchedulerError::Timeout,
+		    [](CancelAllCommand &) {}
+		);
 	}
 	return impl_->manualCore.cancelAll();
 }
@@ -428,14 +481,13 @@ SchedulerResult<size_t> ESPScheduler::jobCount() const {
 		return SchedulerResult<size_t>::failure(SchedulerError::NotInitialized);
 	}
 	if (impl_->config.mode == SchedulerMode::Background && impl_->service) {
-		JobCountCommand command;
-		if (!impl_->service->send(command)) {
-			return SchedulerResult<size_t>::failure(SchedulerError::QueueFull);
-		}
-		if (!command.wait(impl_->config.service.controlTimeoutMs)) {
-			return SchedulerResult<size_t>::failure(SchedulerError::Timeout);
-		}
-		return command.result;
+		return executeBackgroundCommand<JobCountCommand, SchedulerResult<size_t>>(
+		    *impl_->service,
+		    impl_->config.service.controlTimeoutMs,
+		    SchedulerError::QueueFull,
+		    SchedulerError::Timeout,
+		    [](JobCountCommand &) {}
+		);
 	}
 	return impl_->manualCore.jobCount();
 }
@@ -446,18 +498,16 @@ SchedulerResult<void> ESPScheduler::getJobInfo(uint32_t jobId, JobInfo &out) con
 		return SchedulerResult<void>::failure(SchedulerError::NotInitialized);
 	}
 	if (impl_->config.mode == SchedulerMode::Background && impl_->service) {
-		GetJobInfoCommand command;
-		command.jobId = jobId;
-		command.info = &out;
-		if (!impl_->service->send(command)) {
-			out = JobInfo{};
-			return SchedulerResult<void>::failure(SchedulerError::QueueFull);
-		}
-		if (!command.wait(impl_->config.service.controlTimeoutMs)) {
-			out = JobInfo{};
-			return SchedulerResult<void>::failure(SchedulerError::Timeout);
-		}
-		return command.result;
+		return executeBackgroundCommand<GetJobInfoCommand, SchedulerResult<void>>(
+		    *impl_->service,
+		    impl_->config.service.controlTimeoutMs,
+		    SchedulerError::QueueFull,
+		    SchedulerError::Timeout,
+		    [&](GetJobInfoCommand &command) {
+			    command.jobId = jobId;
+			    command.info = &out;
+		    }
+		);
 	}
 	return impl_->manualCore.getJobInfo(jobId, out);
 }
@@ -472,11 +522,13 @@ void ESPScheduler::setMinValidUnixSeconds(int64_t minEpochSeconds) {
 		return;
 	}
 	if (impl_->config.mode == SchedulerMode::Background && impl_->service) {
-		SetMinValidCommand command;
-		command.minEpochSeconds = minEpochSeconds;
-		if (impl_->service->send(command)) {
-			command.wait(impl_->config.service.controlTimeoutMs);
-		}
+		(void)executeBackgroundCommand<SetMinValidCommand, SchedulerResult<void>>(
+		    *impl_->service,
+		    impl_->config.service.controlTimeoutMs,
+		    SchedulerError::QueueFull,
+		    SchedulerError::Timeout,
+		    [&](SetMinValidCommand &command) { command.minEpochSeconds = minEpochSeconds; }
+		);
 		return;
 	}
 	impl_->manualCore.setMinValidUnixSeconds(minEpochSeconds);

@@ -13,6 +13,7 @@ class SchedulerService {
 	    ESPDate &date,
 	    const SchedulerServiceConfig &config,
 	    int64_t minValidEpochSeconds,
+	    bool usePSRAMMetadata,
 	    IExecutorResolver &executors
 	);
 	~SchedulerService();
@@ -20,7 +21,7 @@ class SchedulerService {
 	bool begin();
 	void stop();
 
-	bool send(SchedulerServiceCommand &command);
+	bool send(SchedulerServiceCommand *command);
 
 	QueueHandle_t eventQueue() const {
 		return eventQueue_;
@@ -46,6 +47,7 @@ class SchedulerService {
 	QueueHandle_t eventQueue_ = nullptr;
 	QueueSetHandle_t queueSet_ = nullptr;
 	TaskHandle_t task_ = nullptr;
+	bool taskCreatedWithCaps_ = false;
 
 	std::atomic<bool> started_{false};
 	std::atomic<bool> stopRequested_{false};

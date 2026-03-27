@@ -2,7 +2,13 @@
 #include <ESPDate.h>
 #include <ESPScheduler.h>
 #include <cmath>
+#include <cstdlib>
+#include <memory>
+#include <time.h>
 #include <unity.h>
+
+#include "esp_scheduler/executors/scheduler_executor.h"
+#include "esp_scheduler/service/scheduler_events.h"
 
 ESPDate date;
 
@@ -17,6 +23,7 @@ ESPScheduler scheduler(date, manualConfig());
 
 static int inlineHits = 0;
 static int asyncHits = 0;
+static int slowHits = 0;
 
 static void inlineCallback(void *userData) {
 	(void)userData;
@@ -28,6 +35,12 @@ static void asyncCallback(void *userData) {
 	asyncHits++;
 }
 
+static void slowCallback(void *userData) {
+	(void)userData;
+	slowHits++;
+	delay(250);
+}
+
 static double circularDistanceDegrees(double a, double b) {
 	double delta = std::fmod(std::fabs(a - b), 360.0);
 	if (delta > 180.0) {
@@ -36,9 +49,63 @@ static double circularDistanceDegrees(double a, double b) {
 	return delta;
 }
 
-static void test_begin_and_end_are_explicit() {
+class TestQueueExecutor : public ISchedulerExecutor {
+  public:
+	bool begin(const std::shared_ptr<SchedulerExecutorRuntime> &runtime) override {
+		runtime_ = runtime;
+		count_ = 0;
+		return true;
+	}
+
+	void end(bool drainRunningJobs) override {
+		(void)drainRunningJobs;
+		runtime_.reset();
+		count_ = 0;
+	}
+
+	bool submit(const JobInvocation &invocation) override {
+		if (count_ >= kMaxInvocations) {
+			return false;
+		}
+		invocations_[count_++] = invocation;
+		return true;
+	}
+
+	const char *name() const override {
+		return "test-queue";
+	}
+
+	size_t queued() const {
+		return count_;
+	}
+
+	void completeOne() {
+		TEST_ASSERT_TRUE(count_ > 0);
+		JobInvocation invocation = invocations_[0];
+		for (size_t index = 1; index < count_; ++index) {
+			invocations_[index - 1] = invocations_[index];
+		}
+		--count_;
+		invocation.callback.invoke();
+		SchedulerEvent event{};
+		event.kind = SchedulerEventKind::JobFinished;
+		event.jobId = invocation.jobId;
+		event.generation = invocation.generation;
+		TEST_ASSERT_NOT_NULL(runtime_->eventQueue);
+		TEST_ASSERT_EQUAL(pdTRUE, xQueueSend(runtime_->eventQueue, &event, 0));
+	}
+
+  private:
+	static constexpr size_t kMaxInvocations = 8;
+	JobInvocation invocations_[kMaxInvocations]{};
+	size_t count_ = 0;
+	std::shared_ptr<SchedulerExecutorRuntime> runtime_{};
+};
+
+static void test_begin_is_idempotent_and_end_is_explicit() {
 	ESPScheduler local(date, manualConfig());
 	TEST_ASSERT_FALSE(local.running());
+	TEST_ASSERT_TRUE(local.begin());
 	TEST_ASSERT_TRUE(local.begin());
 	TEST_ASSERT_TRUE(local.running());
 	local.end(true);
@@ -116,16 +183,19 @@ static void test_get_job_info_reports_next_run_by_job_id() {
 	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, date.fromUtc(2025, 1, 1, 6, 0, 0)));
 }
 
-static void test_tick_waits_until_clock_valid() {
+static void test_tick_waits_until_clock_valid_and_primes_once() {
 	JobOptions options{};
 	SchedulerResult<uint32_t> added =
-	    scheduler.addJob(Schedule::dailyAtLocal(6, 0), options, &inlineCallback, nullptr);
+	    scheduler.addJobOnceUtc(date.fromUtc(2025, 1, 1, 6, 0, 0), options, &inlineCallback, nullptr);
 	TEST_ASSERT_TRUE(added.ok());
 
 	scheduler.tick(date.fromUtc(1970, 1, 1, 0, 0, 0));
 	TEST_ASSERT_EQUAL(0, inlineHits);
 
 	scheduler.tick(date.fromUtc(2025, 1, 1, 6, 0, 0));
+	TEST_ASSERT_EQUAL(1, inlineHits);
+
+	scheduler.tick(date.fromUtc(2025, 1, 1, 6, 1, 0));
 	TEST_ASSERT_EQUAL(1, inlineHits);
 }
 
@@ -143,6 +213,16 @@ static void test_pause_resume_cancel_and_job_count() {
 	TEST_ASSERT_TRUE(scheduler.resumeJob(first.value).ok());
 	TEST_ASSERT_TRUE(scheduler.cancelJob(second.value).ok());
 	TEST_ASSERT_EQUAL(static_cast<size_t>(1), scheduler.jobCount().value);
+}
+
+static void test_executor_unavailable_is_reported() {
+	JobOptions options{};
+	options.dispatch = DispatchPolicy::Async;
+	options.executorId = 99;
+	TEST_ASSERT_EQUAL(
+	    SchedulerError::ExecutorUnavailable,
+	    scheduler.addJob(Schedule::dailyAtLocal(6, 0), options, &asyncCallback, nullptr).error
+	);
 }
 
 static void test_sunrise_next_occurrence_with_offsets() {
@@ -174,12 +254,16 @@ static void test_sunset_next_occurrence_with_offsets() {
 static void test_moon_phase_name_last_quarter_next_occurrence() {
 	DateTime from = date.fromUtc(2024, 3, 25, 0, 0, 0);
 	DateTime next{};
-	TEST_ASSERT_TRUE(scheduler.computeNextOccurrence(Schedule::moonPhase(MoonPhaseName::LastQuarter, 2), from, next));
+	TEST_ASSERT_TRUE(
+	    scheduler.computeNextOccurrence(Schedule::moonPhase(MoonPhaseName::LastQuarter, 2), from, next)
+	);
 	TEST_ASSERT_TRUE(date.differenceInDays(next, from) <= 40);
 
 	MoonPhaseResult phaseAtNext = date.moonPhase(next);
 	TEST_ASSERT_TRUE(phaseAtNext.ok);
-	TEST_ASSERT_TRUE(circularDistanceDegrees(static_cast<double>(phaseAtNext.angleDegrees), 270.0) <= 6.0);
+	TEST_ASSERT_TRUE(
+	    circularDistanceDegrees(static_cast<double>(phaseAtNext.angleDegrees), 270.0) <= 6.0
+	);
 }
 
 static void test_moon_illumination_crossing_and_reschedule() {
@@ -193,7 +277,9 @@ static void test_moon_illumination_crossing_and_reschedule() {
 	TEST_ASSERT_TRUE(std::fabs(firstPhase.illumination * 100.0 - 75.0) <= 2.0);
 
 	DateTime second{};
-	TEST_ASSERT_TRUE(scheduler.computeNextOccurrence(illumSchedule, date.addMinutes(first, 1), second));
+	TEST_ASSERT_TRUE(
+	    scheduler.computeNextOccurrence(illumSchedule, date.addMinutes(first, 1), second)
+	);
 	TEST_ASSERT_TRUE(date.isAfter(second, first));
 }
 
@@ -216,11 +302,124 @@ static void test_invalid_astronomical_schedule_validation() {
 	);
 }
 
+static void test_skip_if_running_behavior() {
+	SchedulerConfig config = manualConfig();
+	ESPScheduler local(date, config);
+	TestQueueExecutor executor;
+	SchedulerResult<uint8_t> executorId = local.registerExecutor(&executor);
+	TEST_ASSERT_TRUE(executorId.ok());
+	TEST_ASSERT_TRUE(local.begin());
+
+	JobOptions options{};
+	options.dispatch = DispatchPolicy::Async;
+	options.executorId = executorId.value;
+
+	SchedulerResult<uint32_t> skipJob =
+	    local.addJob(Schedule::dailyAtLocal(6, 0), options, &asyncCallback, nullptr);
+	TEST_ASSERT_TRUE(skipJob.ok());
+
+	local.tick(date.fromUtc(2025, 1, 1, 6, 0, 0));
+	TEST_ASSERT_EQUAL(static_cast<size_t>(1), executor.queued());
+	local.tick(date.fromUtc(2025, 1, 2, 6, 0, 0));
+	TEST_ASSERT_EQUAL(static_cast<size_t>(1), executor.queued());
+	executor.completeOne();
+	local.tick(date.fromUtc(2025, 1, 2, 6, 0, 0));
+	TEST_ASSERT_EQUAL(1, asyncHits);
+	TEST_ASSERT_EQUAL(static_cast<size_t>(0), executor.queued());
+	local.tick(date.fromUtc(2025, 1, 3, 6, 0, 0));
+	TEST_ASSERT_EQUAL(static_cast<size_t>(1), executor.queued());
+
+	local.end(true);
+}
+
+static void test_queue_one_behavior() {
+	SchedulerConfig config = manualConfig();
+	ESPScheduler local(date, config);
+	TestQueueExecutor executor;
+	SchedulerResult<uint8_t> executorId = local.registerExecutor(&executor);
+	TEST_ASSERT_TRUE(executorId.ok());
+	TEST_ASSERT_TRUE(local.begin());
+
+	JobOptions options{};
+	options.dispatch = DispatchPolicy::Async;
+	options.executorId = executorId.value;
+	options.overlap = OverlapPolicy::QueueOne;
+	SchedulerResult<uint32_t> added =
+	    local.addJob(Schedule::dailyAtLocal(6, 0), options, &asyncCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	local.tick(date.fromUtc(2025, 1, 1, 6, 0, 0));
+	local.tick(date.fromUtc(2025, 1, 2, 6, 0, 0));
+	local.tick(date.fromUtc(2025, 1, 3, 6, 0, 0));
+	TEST_ASSERT_EQUAL(static_cast<size_t>(1), executor.queued());
+
+	executor.completeOne();
+	local.tick(date.fromUtc(2025, 1, 3, 6, 0, 0));
+	TEST_ASSERT_EQUAL(static_cast<size_t>(1), executor.queued());
+	executor.completeOne();
+	local.tick(date.fromUtc(2025, 1, 3, 6, 1, 0));
+	TEST_ASSERT_EQUAL(2, asyncHits);
+	local.end(true);
+}
+
+static void test_allow_parallel_behavior() {
+	SchedulerConfig config = manualConfig();
+	ESPScheduler local(date, config);
+	TestQueueExecutor executor;
+	SchedulerResult<uint8_t> executorId = local.registerExecutor(&executor);
+	TEST_ASSERT_TRUE(executorId.ok());
+	TEST_ASSERT_TRUE(local.begin());
+
+	JobOptions options{};
+	options.dispatch = DispatchPolicy::Async;
+	options.executorId = executorId.value;
+	options.overlap = OverlapPolicy::AllowParallel;
+	SchedulerResult<uint32_t> added =
+	    local.addJob(Schedule::dailyAtLocal(6, 0), options, &asyncCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	local.tick(date.fromUtc(2025, 1, 1, 6, 0, 0));
+	local.tick(date.fromUtc(2025, 1, 2, 6, 0, 0));
+	TEST_ASSERT_EQUAL(static_cast<size_t>(2), executor.queued());
+	executor.completeOne();
+	executor.completeOne();
+	local.tick(date.fromUtc(2025, 1, 2, 6, 1, 0));
+	TEST_ASSERT_EQUAL(2, asyncHits);
+	local.end(true);
+}
+
+static void test_cancel_running_async_job_and_stale_completion_is_ignored() {
+	SchedulerConfig config = manualConfig();
+	ESPScheduler local(date, config);
+	TestQueueExecutor executor;
+	SchedulerResult<uint8_t> executorId = local.registerExecutor(&executor);
+	TEST_ASSERT_TRUE(executorId.ok());
+	TEST_ASSERT_TRUE(local.begin());
+
+	JobOptions options{};
+	options.dispatch = DispatchPolicy::Async;
+	options.executorId = executorId.value;
+	SchedulerResult<uint32_t> added =
+	    local.addJob(Schedule::dailyAtLocal(6, 0), options, &asyncCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	local.tick(date.fromUtc(2025, 1, 1, 6, 0, 0));
+	TEST_ASSERT_EQUAL(static_cast<size_t>(1), executor.queued());
+	TEST_ASSERT_TRUE(local.cancelJob(added.value).ok());
+	executor.completeOne();
+	local.tick(date.fromUtc(2025, 1, 1, 6, 1, 0));
+
+	JobInfo info{};
+	TEST_ASSERT_EQUAL(SchedulerError::NotFound, local.getJobInfo(added.value, info).error);
+	local.end(true);
+}
+
 static void test_background_async_runs_without_tick() {
 	SchedulerConfig config{};
 	config.mode = SchedulerMode::Background;
 	ESPScheduler background(date, config);
 	TEST_ASSERT_TRUE(background.begin());
+	background.setMinValidUnixSeconds(0);
 
 	JobOptions asyncOptions{};
 	asyncOptions.dispatch = DispatchPolicy::Async;
@@ -240,9 +439,67 @@ static void test_background_async_runs_without_tick() {
 	background.end(true);
 }
 
+static void test_v1_compat_cleanup_prunes_canceled_jobs() {
+	ESPSchedulerV1Compat compat(date);
+	uint32_t jobId = compat.addJob(Schedule::dailyAtLocal(6, 0), SchedulerJobMode::Inline, &inlineCallback);
+	TEST_ASSERT_TRUE(jobId != 0);
+
+	SchedulerV1JobInfo info{};
+	TEST_ASSERT_TRUE(compat.getJobInfo(0, info));
+	TEST_ASSERT_EQUAL(jobId, info.id);
+
+	TEST_ASSERT_TRUE(compat.cancelJob(jobId));
+	compat.cleanup();
+	TEST_ASSERT_FALSE(compat.getJobInfo(0, info));
+	compat.deinit();
+}
+
+static void test_end_wait_true_drains_manual_async_invocation() {
+	SchedulerConfig config = manualConfig();
+	ESPScheduler local(date, config);
+	TEST_ASSERT_TRUE(local.begin());
+
+	JobOptions options{};
+	options.dispatch = DispatchPolicy::Async;
+	SchedulerResult<uint32_t> added =
+	    local.addJobOnceUtc(date.fromUtc(2025, 1, 1, 6, 0, 0), options, &slowCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	local.tick(date.fromUtc(2025, 1, 1, 6, 0, 0));
+	local.end(true, 3000);
+	TEST_ASSERT_EQUAL(1, slowHits);
+	TEST_ASSERT_FALSE(local.running());
+}
+
+static void test_end_wait_false_returns_without_drain() {
+	SchedulerConfig config = manualConfig();
+	ESPScheduler local(date, config);
+	TEST_ASSERT_TRUE(local.begin());
+
+	JobOptions options{};
+	options.dispatch = DispatchPolicy::Async;
+	SchedulerResult<uint32_t> added =
+	    local.addJobOnceUtc(date.fromUtc(2025, 1, 1, 6, 0, 0), options, &slowCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	local.tick(date.fromUtc(2025, 1, 1, 6, 0, 0));
+	const uint32_t startedMs = millis();
+	local.end(false, 10);
+	TEST_ASSERT_TRUE((millis() - startedMs) < 200);
+}
+
+static void test_begin_fails_for_invalid_service_stack_size() {
+	SchedulerConfig config{};
+	config.mode = SchedulerMode::Background;
+	config.service.taskStackSize = 1000;
+	ESPScheduler local(date, config);
+	TEST_ASSERT_FALSE(local.begin());
+}
+
 void setUp() {
 	inlineHits = 0;
 	asyncHits = 0;
+	slowHits = 0;
 	scheduler.begin();
 	scheduler.setMinValidUnixSeconds(ESPScheduler::kDefaultMinValidEpochSeconds);
 	scheduler.cancelAll();
@@ -263,21 +520,30 @@ void setup() {
 	delay(2000);
 
 	UNITY_BEGIN();
-	RUN_TEST(test_begin_and_end_are_explicit);
+	RUN_TEST(test_begin_is_idempotent_and_end_is_explicit);
 	RUN_TEST(test_daily_at_local_next_same_day);
 	RUN_TEST(test_daily_at_local_rolls_to_next_day);
 	RUN_TEST(test_weekly_mask_advances_to_next_weekday);
 	RUN_TEST(test_dom_dow_or_logic_matches_either);
 	RUN_TEST(test_inline_tick_runs_and_reschedules);
 	RUN_TEST(test_get_job_info_reports_next_run_by_job_id);
-	RUN_TEST(test_tick_waits_until_clock_valid);
+	RUN_TEST(test_tick_waits_until_clock_valid_and_primes_once);
 	RUN_TEST(test_pause_resume_cancel_and_job_count);
+	RUN_TEST(test_executor_unavailable_is_reported);
 	RUN_TEST(test_sunrise_next_occurrence_with_offsets);
 	RUN_TEST(test_sunset_next_occurrence_with_offsets);
 	RUN_TEST(test_moon_phase_name_last_quarter_next_occurrence);
 	RUN_TEST(test_moon_illumination_crossing_and_reschedule);
 	RUN_TEST(test_invalid_astronomical_schedule_validation);
+	RUN_TEST(test_skip_if_running_behavior);
+	RUN_TEST(test_queue_one_behavior);
+	RUN_TEST(test_allow_parallel_behavior);
+	RUN_TEST(test_cancel_running_async_job_and_stale_completion_is_ignored);
 	RUN_TEST(test_background_async_runs_without_tick);
+	RUN_TEST(test_end_wait_true_drains_manual_async_invocation);
+	RUN_TEST(test_end_wait_false_returns_without_drain);
+	RUN_TEST(test_begin_fails_for_invalid_service_stack_size);
+	RUN_TEST(test_v1_compat_cleanup_prunes_canceled_jobs);
 	UNITY_END();
 }
 

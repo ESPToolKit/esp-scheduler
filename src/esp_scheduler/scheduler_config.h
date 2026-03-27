@@ -31,7 +31,6 @@ struct SchedulerServiceConfig {
 	UBaseType_t taskPriority = 1;
 	BaseType_t coreId = tskNO_AFFINITY;
 	bool usePsramStack = false;
-	int64_t minValidEpochSeconds = 1577836800;
 	uint32_t controlTimeoutMs = 2000;
 };
 

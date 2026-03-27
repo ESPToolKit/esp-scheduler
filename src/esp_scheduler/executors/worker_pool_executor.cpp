@@ -3,6 +3,7 @@
 #include <new>
 
 #include "../service/scheduler_events.h"
+#include "task_support.h"
 
 namespace {
 bool postCompletion(const std::shared_ptr<SchedulerExecutorRuntime> &runtime, uint32_t jobId, uint32_t generation) {
@@ -23,9 +24,11 @@ struct WorkerPoolExecutor::TaskItem {
 
 struct WorkerPoolExecutor::WorkerContext {
 	WorkerPoolExecutor *owner = nullptr;
+	bool createdWithCaps = false;
 };
 
-WorkerPoolExecutor::WorkerPoolExecutor(const WorkerPoolConfig &config) : config_(config) {
+WorkerPoolExecutor::WorkerPoolExecutor(const WorkerPoolConfig &config)
+    : config_(config), workers_(false) {
 }
 
 WorkerPoolExecutor::~WorkerPoolExecutor() {
@@ -54,21 +57,29 @@ bool WorkerPoolExecutor::begin(const std::shared_ptr<SchedulerExecutorRuntime> &
 		context->owner = this;
 
 		TaskHandle_t handle = nullptr;
-		const BaseType_t created = xTaskCreatePinnedToCore(
+		bool createdWithCaps = false;
+		const BaseType_t created = scheduler_task_support::createTaskPinned(
 		    &WorkerPoolExecutor::workerTaskEntry,
 		    "sched-pool",
 		    config_.stackSize,
 		    context,
 		    config_.priority,
 		    &handle,
-		    config_.coreId
+		    config_.coreId,
+		    config_.usePsramStack,
+		    createdWithCaps
 		);
 		if (created != pdPASS || handle == nullptr) {
 			delete context;
 			end(false);
 			return false;
 		}
-		workers_.push_back(handle);
+		context->createdWithCaps = createdWithCaps;
+		if (!workers_.pushBack({handle, createdWithCaps})) {
+			scheduler_task_support::deleteTask(handle, createdWithCaps);
+			end(false);
+			return false;
+		}
 		workersRunning_.fetch_add(1);
 	}
 
@@ -98,6 +109,15 @@ void WorkerPoolExecutor::end(bool drainRunningJobs) {
 	const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(2000);
 	while (workersRunning_.load() > 0 && xTaskGetTickCount() < deadline) {
 		vTaskDelay(pdMS_TO_TICKS(10));
+	}
+
+	if (workersRunning_.load() > 0) {
+		for (size_t index = 0; index < workers_.size(); ++index) {
+			scheduler_task_support::deleteTask(
+			    workers_[index].task,
+			    workers_[index].createdWithCaps
+			);
+		}
 	}
 
 	if (queue_) {
@@ -141,6 +161,7 @@ void WorkerPoolExecutor::workerTaskEntry(void *arg) {
 	}
 
 	WorkerPoolExecutor *owner = context->owner;
+	const bool createdWithCaps = context->createdWithCaps;
 	delete context;
 
 	while (true) {
@@ -158,5 +179,5 @@ void WorkerPoolExecutor::workerTaskEntry(void *arg) {
 	}
 
 	owner->workersRunning_.fetch_sub(1);
-	vTaskDelete(nullptr);
+	scheduler_task_support::deleteCurrentTask(createdWithCaps);
 }

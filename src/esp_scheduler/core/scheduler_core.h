@@ -1,7 +1,5 @@
 #pragma once
 
-#include <vector>
-
 #include "../schedule/schedule_calculator.h"
 #include "../scheduler_result.h"
 #include "../service/scheduler_events.h"
@@ -10,7 +8,7 @@
 
 class SchedulerCore {
   public:
-	SchedulerCore(ESPDate &date, int64_t minValidEpochSeconds);
+	SchedulerCore(ESPDate &date, int64_t minValidEpochSeconds, bool usePSRAMMetadata);
 
 	void setMinValidUnixSeconds(int64_t minEpochSeconds);
 	int64_t minValidUnixSeconds() const;
@@ -30,7 +28,9 @@ class SchedulerCore {
 	SchedulerResult<void> getJobInfo(uint32_t jobId, JobInfo &out) const;
 
 	void dispatchDue(const DateTime &nowUtc, IExecutorResolver &executors);
-	void handleEvent(const SchedulerEvent &event, const DateTime &nowUtc, IExecutorResolver &executors);
+	void handleEvent(
+	    const SchedulerEvent &event, const DateTime &nowUtc, IExecutorResolver &executors
+	);
 
 	bool nextDueEpoch(int64_t &outEpochSeconds) const;
 	size_t activeInvocationCount() const;
@@ -38,17 +38,24 @@ class SchedulerCore {
   private:
 	SchedulerResult<size_t> findJobSlot(uint32_t jobId) const;
 	bool computeNextForJob(JobRecord &record, const DateTime &fromUtc);
-	void pushDue(size_t slotIndex, const JobRecord &record);
+	bool pushDue(size_t slotIndex, const JobRecord &record);
 	void retireJob(size_t slotIndex);
 	void finalizeCanceledIfIdle(size_t slotIndex);
-	void dispatchDeferredIfNeeded(size_t slotIndex, const DateTime &nowUtc, IExecutorResolver &executors);
-	void dispatchOne(size_t slotIndex, const DateTime &nowUtc, IExecutorResolver &executors, bool deferred);
-	void handleCompletion(size_t slotIndex, const DateTime &nowUtc, IExecutorResolver &executors);
+	void dispatchDeferredIfNeeded(
+	    size_t slotIndex, const DateTime &nowUtc, IExecutorResolver &executors
+	);
+	void dispatchOne(
+	    size_t slotIndex, const DateTime &nowUtc, IExecutorResolver &executors, bool deferred
+	);
+	void handleCompletion(
+	    size_t slotIndex, const DateTime &nowUtc, IExecutorResolver &executors
+	);
 
 	ESPDate &date_;
 	int64_t minValidEpochSeconds_ = 0;
+	bool usePSRAMMetadata_ = false;
 	uint32_t nextId_ = 1;
-	std::vector<JobRecord> jobs_{};
-	std::vector<size_t> freeSlots_{};
+	SchedulerArray<JobRecord> jobs_{};
+	SchedulerArray<size_t> freeSlots_{};
 	DueHeap dueHeap_{};
 };

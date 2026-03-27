@@ -63,5 +63,6 @@ class ISchedulerExecutor {
 class IExecutorResolver {
   public:
 	virtual ~IExecutorResolver() = default;
+	virtual ISchedulerExecutor *inlineExecutor() = 0;
 	virtual ISchedulerExecutor *executorFor(uint8_t executorId) = 0;
 };
