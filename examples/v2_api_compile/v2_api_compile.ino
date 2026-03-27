@@ -78,7 +78,11 @@ void setup() {
 	asyncOptions.executorId = scheduler.defaultWorkerExecutor();
 	asyncOptions.overlap = OverlapPolicy::QueueOne;
 	asyncOptions.name = "worker-pool";
-	(void)scheduler.addJobOnceUtc(date.fromUtc(2026, 1, 1, 12, 0, 0), asyncOptions, [](void *) {});
+	(void)scheduler.addJobOnceUtc(
+	    date.fromUtc(2026, 1, 1, 12, 0, 0),
+	    asyncOptions,
+	    SchedulerFunction([](void *) {})
+	);
 
 	DedicatedTaskOptions dedicated{};
 	dedicated.name = "compile-task";
