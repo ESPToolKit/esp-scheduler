@@ -1,7 +1,7 @@
 {
   "name": "ESPScheduler",
-  "version": "1.0.2",
-  "description": "Cron-style wall-clock scheduler for ESP32 firmware (Arduino or ESP-IDF)",
+  "version": "2.0.0",
+  "description": "Cron-style ESP32 scheduler with a central core, background service, and pluggable executors",
   "keywords": [
     "esp32",
     "arduino",
@@ -38,6 +38,10 @@
     {
       "name": "ESPBufferManager",
       "version": "https://github.com/ESPToolKit/esp-buffer-manager.git"
+    },
+    {
+      "name": "ESPWorker",
+      "version": "https://github.com/ESPToolKit/esp-worker.git"
     }
   ],
   "headers": [

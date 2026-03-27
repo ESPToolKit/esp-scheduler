@@ -3,7 +3,7 @@
 #include <ESPScheduler.h>
 
 ESPDate date;
-ESPScheduler scheduler(date);
+ESPSchedulerV1Compat scheduler(date);
 uint32_t jobId = 0;
 
 void recurringInline(void *userData) {

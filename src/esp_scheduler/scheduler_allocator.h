@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <new>
 #include <vector>
@@ -33,7 +34,71 @@ inline void deallocate(void *ptr) noexcept {
 	std::free(ptr);
 #endif
 }
+
+inline void *reallocate(void *ptr, std::size_t bytes, bool usePSRAMBuffers) noexcept {
+#if ESP_SCHEDULER_HAS_BUFFER_MANAGER
+	void *next = ESPBufferManager::allocate(bytes, usePSRAMBuffers);
+	if (!next) {
+		return nullptr;
+	}
+	if (ptr && next != ptr) {
+		std::memcpy(next, ptr, bytes);
+		ESPBufferManager::deallocate(ptr);
+	}
+	return next;
+#else
+	(void)usePSRAMBuffers;
+	return std::realloc(ptr, bytes);
+#endif
+}
 } // namespace scheduler_allocator_detail
+
+template <typename T> T *schedulerAllocate(std::size_t count, bool usePSRAMBuffers) noexcept {
+	if (count == 0) {
+		return nullptr;
+	}
+	if (count > (std::numeric_limits<std::size_t>::max() / sizeof(T))) {
+		return nullptr;
+	}
+	return static_cast<T *>(
+	    scheduler_allocator_detail::allocate(count * sizeof(T), usePSRAMBuffers)
+	);
+}
+
+template <typename T> void schedulerDeallocate(T *ptr) noexcept {
+	scheduler_allocator_detail::deallocate(ptr);
+}
+
+template <typename T>
+T *schedulerReallocate(T *ptr, std::size_t oldCount, std::size_t newCount, bool usePSRAMBuffers) noexcept {
+	(void)oldCount;
+	if (newCount == 0) {
+		scheduler_allocator_detail::deallocate(ptr);
+		return nullptr;
+	}
+	if (newCount > (std::numeric_limits<std::size_t>::max() / sizeof(T))) {
+		return nullptr;
+	}
+#if ESP_SCHEDULER_HAS_BUFFER_MANAGER
+	T *next = schedulerAllocate<T>(newCount, usePSRAMBuffers);
+	if (!next) {
+		return nullptr;
+	}
+	if (ptr) {
+		const std::size_t toCopy = oldCount < newCount ? oldCount : newCount;
+		for (std::size_t index = 0; index < toCopy; ++index) {
+			new (&next[index]) T(std::move(ptr[index]));
+			ptr[index].~T();
+		}
+		schedulerDeallocate(ptr);
+	}
+	return next;
+#else
+	return static_cast<T *>(
+	    scheduler_allocator_detail::reallocate(ptr, newCount * sizeof(T), usePSRAMBuffers)
+	);
+#endif
+}
 
 template <typename T> class SchedulerAllocator {
   public:
