@@ -3,7 +3,7 @@
 #include <ESPScheduler.h>
 
 ESPDate date;
-ESPScheduler scheduler(date);
+ESPSchedulerV1Compat scheduler(date);
 
 void everyDay(void *userData) {
 	(void)userData;

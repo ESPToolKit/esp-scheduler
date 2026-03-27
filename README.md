@@ -1,356 +1,190 @@
 # ESPScheduler
 
-ESPScheduler is a C++17, class-based scheduler for ESP32 firmware that brings cron-like calendar patterns without parsing cron strings. It builds on [ESPDate](https://github.com/ESPToolKit/esp-date) for all wall-clock math and can run jobs either inline (driven by `tick()`) or on dedicated native FreeRTOS tasks.
+ESPScheduler v2 is a C++17 scheduler for ESP32 firmware that keeps the cron-style DSL from v1, but replaces the old task-per-job async model with one central scheduler core, one optional background service task, and pluggable executors.
 
 ## CI / Release / License
 [![CI](https://github.com/ESPToolKit/esp-scheduler/actions/workflows/ci.yml/badge.svg)](https://github.com/ESPToolKit/esp-scheduler/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ESPToolKit/esp-scheduler?sort=semver)](https://github.com/ESPToolKit/esp-scheduler/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 
+## What Changed In v2
+- One `SchedulerCore` owns job state, next-run computation, overlap handling, and rescheduling.
+- Background mode uses one scheduler task and queue-based control-plane serialization. No mandatory `tick()` in background mode.
+- Async execution goes through executors. The default path is a fixed worker pool instead of one FreeRTOS task per job.
+- Manual mode still exists for tight firmware loops and uses the same core as background mode.
+- The public API now uses `SchedulerResult<T>` for mutating/query operations.
+- A thin `ESPSchedulerV1Compat` wrapper is shipped for migration.
+
 ## Features
-- **Cron-style patterns, no strings**: express minute/hour/day/month/weekday filters with `ScheduleField` objects and helpers for daily/weekly/monthly runs.
-- **Inline or worker execution**: run callbacks inside `tick()` or on their own FreeRTOS task (with separate PSRAM policies for buffers and task stacks).
-- **One-shot UTC triggers**: schedule absolute UTC times alongside recurring patterns.
-- **Astronomical schedules**: trigger jobs at sunrise/sunset (with minute offsets), moon phase angles/names, and moon illumination crossings.
-- **Calendar-aware**: respects classic cron `dayOfMonth` vs `dayOfWeek` logic and always operates in local time.
-- **Clock guard for unset RTC**: defaults to idling until the wall clock reaches 2020-01-01 UTC (configurable) so jobs do not replay from the 1970 epoch when SNTP syncs later.
-- **Optional PSRAM buffer policy**: `ESPSchedulerConfig::usePSRAMBuffers` routes scheduler-owned job/context storage through ESPBufferManager with automatic fallback to default heap.
-- **Class-based API**: everything hangs off an `ESPScheduler` instance; no global namespaces or macros.
-- **Arduino / ESP-IDF friendly**: C++17, metadata for PlatformIO/Arduino CLI, and examples/tests ready for CI.
+- Cron-style schedule DSL with `ScheduleField`, `Schedule`, one-shot UTC helpers, sunrise/sunset helpers, and moon helpers.
+- Manual mode and background mode under one API.
+- `DispatchPolicy::Inline` or `DispatchPolicy::Async`.
+- `OverlapPolicy::SkipIfRunning`, `QueueOne`, and `AllowParallel`.
+- Built-in worker-pool executor, dedicated-task executor, and `ESPWorkerExecutorAdapter`.
+- Deterministic lifecycle with `begin()` / `end()`.
+- Clock validity guard via `setMinValidUnixSeconds()` / `setMinValidUtc()`.
+- Arduino / ESP-IDF friendly metadata and device tests.
 
-## Getting Started
-Install one of two ways:
-- Download the repository zip from GitHub, extract it, and drop the folder into your PlatformIO `lib/` directory, Arduino IDE `libraries/` directory, or add it as an ESP-IDF component.
-- Add the public GitHub URL to `lib_deps` in `platformio.ini` so PlatformIO fetches it for you:
+## Install
+- PlatformIO:
+  ```ini
+  lib_deps =
+    https://github.com/ESPToolKit/esp-date.git
+    https://github.com/ESPToolKit/esp-worker.git
+    https://github.com/ESPToolKit/esp-scheduler.git
   ```
-  lib_deps = https://github.com/ESPToolKit/esp-scheduler.git
-  ```
-- Arduino CLI: install the library and its deps, then compile any example sketch:
+- Arduino CLI:
   ```bash
+  arduino-cli lib install "ArduinoJson"
   arduino-cli lib install --git-url https://github.com/ESPToolKit/esp-date.git
+  arduino-cli lib install --git-url https://github.com/ESPToolKit/esp-worker.git
   arduino-cli lib install --git-url https://github.com/ESPToolKit/esp-scheduler.git
-  arduino-cli compile --fqbn esp32:esp32:esp32 examples/inline_daily
   ```
 
-Then include the scheduler together with its dependencies:
+## Quick Start
 
+### Manual mode
 ```cpp
 #include <Arduino.h>
 #include <ESPDate.h>
 #include <ESPScheduler.h>
 
 ESPDate date;
-ESPScheduler scheduler(date);
 
-void morningBackup(void* userData) {
-    Serial.println("Running morning backup...");
+SchedulerConfig schedulerConfig() {
+    SchedulerConfig config{};
+    config.mode = SchedulerMode::Manual;
+    return config;
+}
+
+ESPScheduler scheduler(date, schedulerConfig());
+
+static void pulse(void* /*userData*/) {
+    Serial.println("manual inline pulse");
 }
 
 void setup() {
     Serial.begin(115200);
-    // Configure SNTP/time zone before scheduling so ESPDate reports valid local time.
-    // Optional: raise the minimum valid clock to block jobs until SNTP sets time.
-    scheduler.setMinValidUtc(date.fromUtc(2020, 1, 1, 0, 0, 0));
+    scheduler.begin();
 
-    // Run every weekday at 07:30 (local time) on a dedicated worker task
-    uint8_t weekdaysMask = 0b0111110; // Mon..Fri
-    scheduler.addJob(
-        Schedule::weeklyAtLocal(weekdaysMask, 7, 30),
-        SchedulerJobMode::WorkerTask,
-        &morningBackup
-    );
-}
-
-void loop() {
-    scheduler.tick(); // still safe to call; worker jobs self-drive
-    delay(5000);
-}
-```
-
-Call `deinit()` explicitly when you no longer need scheduled jobs (for example before deep sleep or component shutdown):
-
-```cpp
-scheduler.deinit();
-if (!scheduler.isInitialized()) {
-    Serial.println("Scheduler stopped");
-}
-```
-
-## API quick map
-- `SchedulerJobMode`: `Inline` (runs inside `tick()`) or `WorkerTask` (dedicated FreeRTOS task).
-- `ESPSchedulerConfig`: scheduler-level memory policy (`usePSRAMBuffers`) for scheduler-owned dynamic buffers.
-- `SchedulerTaskConfig`: optional worker task config (name, stack size, priority, core, PSRAM stack flag).
-- `SchedulerCallback`: `using SchedulerCallback = void (*)(void* userData);`
-- `SchedulerFunction`: `using SchedulerFunction = std::function<void(void* userData)>;` (capturing lambdas supported).
-- `SchedulerFunctionNoData`: `using SchedulerFunctionNoData = std::function<void()>;` (no-arg lambdas supported).
-- `setMinValidUnixSeconds` / `setMinValidUtc`: block all inline/worker jobs until the wall clock reaches this point (default: 2020-01-01 UTC).
-- `ScheduleField`: bitmask-backed allowed values for one cron field. Builders: `any()`, `only()`, `range()`, `every()`, `rangeEvery()`, `list()`.
-- `Schedule`: one-shot (`onceUtc`) or cron-like via helpers: `dailyAtLocal`, `weeklyAtLocal`, `monthlyOnDayLocal`, `custom`.
-- Astronomical helpers: `sunrise(offsetMin)`, `sunset(offsetMin)`, `moonPhase(name/tolerance)`, `moonPhaseAngle(angle/tolerance)`, `moonIlluminationPercent(percent/tolerance)`.
-- `JobInfo` / `getJobInfo(index, info)`: inspect active jobs (inline first, then worker), including enabled state, schedule copy, and next run (if known).
-- `cleanup()`: manually purge finished inline/worker jobs when you are not calling `tick()`.
-- `deinit()`: cancels and destroys all active jobs; destructor calls it automatically.
-- `isInitialized()`: reports whether the scheduler is currently active after construction/re-init and false after `deinit()`.
-
-```cpp
-ESPSchedulerConfig schedCfg;
-schedCfg.usePSRAMBuffers = true;                    // falls back safely when PSRAM is unavailable
-ESPScheduler scheduler(date, schedCfg);
-uint32_t id = scheduler.addJob(
-    Schedule::dailyAtLocal(7, 30),
-    SchedulerJobMode::Inline,
-    &myCallback,
-    nullptr
-);
-
-scheduler.pauseJob(id);
-scheduler.resumeJob(id);
-scheduler.cancelJob(id);
-```
-
-Capturing lambda callbacks are supported via the `std::function` overload:
-
-```cpp
-DateTime bootTargetUtc = date.addMinutes(date.now(), 2);
-scheduler.addJobOnceUtc(
-    bootTargetUtc,
-    SchedulerJobMode::Inline,
-    [this](void* /*userData*/) {
-        doSomething();
-    }
-);
-```
-
-No-arg lambdas are also supported:
-
-```cpp
-scheduler.addJobOnceUtc(
-    bootTargetUtc,
-    SchedulerJobMode::Inline,
-    [this]() {
-        doSomething();
-    }
-);
-```
-
-## Schedule recipes
-```cpp
-// One-shot absolute UTC
-Schedule once = Schedule::onceUtc(date.fromUtc(2025, 1, 1, 12, 0));
-
-// Daily 08:15 (local)
-Schedule daily = Schedule::dailyAtLocal(8, 15);
-
-// Weekdays at 18:30 (bitmask: 0=Sun, 1=Mon...)
-uint8_t weekdays = 0b0111110; // Mon..Fri
-Schedule weekly = Schedule::weeklyAtLocal(weekdays, 18, 30);
-
-// Monthly on the 1st at 09:00 (clamps 29/30/31 to valid)
-Schedule monthly = Schedule::monthlyOnDayLocal(1, 9, 0);
-
-// Custom cron-like: every 5 minutes between 9-17 on Mon/Wed/Fri
-int days[] = {1, 3, 5};
-Schedule custom = Schedule::custom(
-    ScheduleField::every(5),        // minute
-    ScheduleField::range(9, 17),    // hour
-    ScheduleField::any(),           // day of month
-    ScheduleField::any(),           // month
-    ScheduleField::list(days, 3)    // day of week
-);
-
-// Astronomical schedules (requires ESPDate initialized with latitude/longitude + TZ)
-Schedule sunriseNow = Schedule::sunrise();                       // exactly sunrise
-Schedule sunsetLate = Schedule::sunset(15);                      // sunset + 15 minutes
-Schedule preDawn = Schedule::sunrise(-30);                       // sunrise - 30 minutes
-Schedule lastQuarter = Schedule::moonPhase(MoonPhaseName::LastQuarter, 2);
-Schedule phase270 = Schedule::moonPhaseAngle(270, 2);            // explicit angle
-Schedule illum75 = Schedule::moonIlluminationPercent(75.0, 0.5); // percent + tolerance
-```
-
-### Execution modes
-- **Inline**: call `tick()` periodically; callbacks run in the caller’s context.
-- **WorkerTask**: each job gets its own FreeRTOS task that sleeps until due. Configure stacks/priority/affinity via `SchedulerTaskConfig`.
-- **Memory policy split**: `ESPSchedulerConfig::usePSRAMBuffers` controls scheduler-owned dynamic buffer placement; `SchedulerTaskConfig::usePsramStack` controls worker task stack placement.
-- Even if you only schedule `WorkerTask` jobs, call `tick()` or `cleanup()` occasionally so the scheduler can drop finished worker job metadata.
-
-### Cron semantics
-- Resolution: minutes (seconds always treated as zero).
-- Local time matching via ESPDate; honour your TZ/DST setup before scheduling.
-- `dayOfMonth` vs `dayOfWeek`: classic cron OR rule when both are restricted; either can satisfy the day check.
-- Astronomical moon jobs trigger on crossing events (with tolerance), not exact floating-point equality checks.
-- Clock validity guard: inline and worker paths stay idle while `now()` is before `setMinValidUnixSeconds()` (default 2020-01-01 UTC). Set it to `0` if you explicitly want to allow pre-2000 times.
-
-## Examples
-
-For sun/moon schedules, see `examples/inline_astronomical/inline_astronomical.ino`.
-
-### Inline daily tick (no worker needed)
-```cpp
-#include <Arduino.h>
-#include <ESPDate.h>
-#include <ESPScheduler.h>
-
-ESPDate date;
-ESPScheduler scheduler(date);  // inline jobs only
-
-static void waterPlants(void* /*userData*/) {
-    Serial.println("Watering plants...");
-}
-
-void setup() {
-    Serial.begin(115200);
-    // Set TZ + SNTP before scheduling so local time is valid
-    scheduler.setMinValidUtc(date.fromUtc(2020, 1, 1, 0, 0, 0));
-
-    // 07:00 every day, inline
-    scheduler.addJob(
-        Schedule::dailyAtLocal(7, 0),
-        SchedulerJobMode::Inline,
-        &waterPlants
-    );
-}
-
-void loop() {
-    scheduler.tick();  // computes next runs using date.now()
-    delay(1000);
-}
-```
-
-### Worker task with custom stack/priority
-```cpp
-#include <Arduino.h>
-#include <ESPDate.h>
-#include <ESPScheduler.h>
-
-ESPDate date;
-ESPScheduler scheduler(date);
-
-static void backupJob(void* /*userData*/) {
-    Serial.println("Backing up to cloud...");
-    // heavy work is safe here; job owns its own FreeRTOS task
-}
-
-void setup() {
-    Serial.begin(115200);
-    scheduler.setMinValidUtc(date.fromUtc(2020, 1, 1, 0, 0, 0));
-
-    SchedulerTaskConfig cfg;
-    cfg.name = "backup";
-    cfg.stackSize = 8192;
-    cfg.priority = 3;
-    cfg.coreId = 1;
-    cfg.usePsramStack = true;
-
-    scheduler.addJob(
-        Schedule::weeklyAtLocal(0b0000010, 2, 30), // Mondays 02:30 local
-        SchedulerJobMode::WorkerTask,
-        &backupJob,
-        nullptr,
-        &cfg
-    );
-}
-
-void loop() {
-    scheduler.tick();   // still safe to call; frees finished worker metadata
-    delay(1000);
-}
-```
-
-### One-shot + inspecting/pause/resume
-```cpp
-#include <Arduino.h>
-#include <ESPDate.h>
-#include <ESPScheduler.h>
-
-ESPDate date;
-ESPScheduler scheduler(date);
-
-static void firmwareSwap(void* /*userData*/) {
-    Serial.println("Swapping firmware banks now");
-}
-
-void setup() {
-    Serial.begin(115200);
-    DateTime when = date.fromUtc(2025, 1, 15, 12, 0, 0);
-    uint32_t id = scheduler.addJobOnceUtc(
-        when,
-        SchedulerJobMode::Inline,
-        &firmwareSwap
-    );
-
-    JobInfo info{};
-    if (scheduler.getJobInfo(0, info)) {
-        Serial.printf("Job %u next run: %lld\n", info.id, info.nextRunUtc.epochSeconds);
-        scheduler.pauseJob(info.id);   // stop until resumeJob is called
-        scheduler.resumeJob(info.id);
-    }
+    JobOptions options{};
+    scheduler.addJob(Schedule::dailyAtLocal(8, 15), options, &pulse, nullptr);
 }
 
 void loop() {
     scheduler.tick();
-    delay(500);
+    delay(1000);
 }
 ```
 
-Example sketches in this repo:
-- `examples/inline_daily/inline_daily.ino` — inline daily tick loop.
-- `examples/inline_one_shot/inline_one_shot.ino` — single UTC trigger inline.
-- `examples/inline_pause_resume/inline_pause_resume.ino` — pausing/resuming a repeating inline job.
-- `examples/inline_every_day_midnight/inline_every_day_midnight.ino` — every day at local midnight.
-- `examples/inline_every_hour/inline_every_hour.ino` — every hour (top of hour) every day.
-- `examples/inline_every_minute/inline_every_minute.ino` — every minute all day.
-- `examples/inline_every_minute_selected_days/inline_every_minute_selected_days.ino` — every minute on selected weekdays.
-- `examples/inline_every_hour_selected_days/inline_every_hour_selected_days.ino` — every hour on selected weekdays.
-- `examples/inline_every_15_minutes_work_hours/inline_every_15_minutes_work_hours.ino` — every 15 minutes during business hours.
-- `examples/worker_weekly/worker_weekly.ino` — weekly heavy job on its own task with custom stack/priority.
-- `examples/worker_one_shot/worker_one_shot.ino` — one-shot worker task using PSRAM stack.
-- `examples/custom_fields/custom_fields.ino` — custom cron fields (every N minutes, selected weekdays/hours).
-- `examples/monthly_on_day/monthly_on_day.ino` — monthly day-of-month trigger with clamping.
+### Background mode with worker pool
+```cpp
+#include <Arduino.h>
+#include <ESPDate.h>
+#include <ESPScheduler.h>
 
-## Gotchas
-- Always set time zone and SNTP before scheduling; pair that with `setMinValidUtc` so jobs do not all replay at boot from the 1970 epoch.
-- Even when you only run worker tasks, call `tick()` or `cleanup()` periodically so finished worker metadata is freed.
-- `ScheduleField::list` drops out-of-range values; if every entry is invalid, `addJob` returns `0` because the schedule fails validation.
-- Matching happens at minute resolution; if you need per-second triggers, pair ESPScheduler with ESPTimer counters instead.
+ESPDate date;
+ESPScheduler scheduler(date); // background mode by default
 
-## Restrictions
-- Designed for ESP32 boards (Arduino-ESP32 or ESP-IDF) with FreeRTOS and C++17 enabled.
-- Depends on ESPDate for wall-clock math.
-- Each worker job spawns its own task with its own stack; size those stacks (or enable PSRAM stacks) according to your workload.
-- Schedules operate in local time and clamp invalid calendar combinations (e.g., 31st on shorter months).
+static void syncJob(void* /*userData*/) {
+    Serial.println("background worker-pool job");
+}
 
-## Examples (one focus per sketch)
-- `examples/inline_daily/inline_daily.ino` — inline daily tick loop.
-- `examples/inline_one_shot/inline_one_shot.ino` — single UTC trigger inline.
-- `examples/inline_pause_resume/inline_pause_resume.ino` — pausing/resuming a repeating inline job.
-- `examples/inline_every_day_midnight/inline_every_day_midnight.ino` — every day at local midnight.
-- `examples/inline_every_hour/inline_every_hour.ino` — every hour (top of hour) every day.
-- `examples/inline_every_minute/inline_every_minute.ino` — every minute all day.
-- `examples/inline_every_minute_selected_days/inline_every_minute_selected_days.ino` — every minute on selected weekdays.
-- `examples/inline_every_hour_selected_days/inline_every_hour_selected_days.ino` — every hour on selected weekdays.
-- `examples/inline_every_15_minutes_work_hours/inline_every_15_minutes_work_hours.ino` — every 15 minutes during business hours.
-- `examples/worker_weekly/worker_weekly.ino` — weekly heavy job on its own task with custom stack/priority.
-- `examples/worker_one_shot/worker_one_shot.ino` — one-shot worker task using PSRAM stack.
-- `examples/custom_fields/custom_fields.ino` — custom cron fields (every N minutes, selected weekdays/hours).
-- `examples/monthly_on_day/monthly_on_day.ino` — monthly day-of-month trigger with clamping.
+void setup() {
+    Serial.begin(115200);
+    scheduler.begin();
 
-## Tests
-- Unity-based device tests live in `test/test_esp_scheduler`; drop the folder into a PlatformIO workspace and run `pio test -e esp32dev` against real hardware.
-- Host-side CTest is intentionally skipped because the scheduler relies on ESP32 FreeRTOS and ESPDate wall-clock helpers.
-- CI also compiles all examples through PlatformIO and Arduino CLI across ESP32, S3, C3, and P4 boards.
+    JobOptions options{};
+    options.dispatch = DispatchPolicy::Async;
 
-## Formatting Baseline
+    scheduler.addJob(
+        Schedule::weeklyAtLocal(0b0111110, 18, 30),
+        options,
+        &syncJob,
+        nullptr
+    );
+}
 
-This repository follows the firmware formatting baseline from `esptoolkit-template`:
-- `.clang-format` is the source of truth for C/C++/INO layout.
-- `.editorconfig` enforces tabs (`tab_width = 4`), LF endings, and final newline.
-- Format all tracked firmware sources with `bash scripts/format_cpp.sh`.
+void loop() {
+    delay(2000);
+}
+```
+
+## Public API
+- `bool begin()` / `void end(bool waitForRunningJobs = true, uint32_t timeoutMs = 5000)`
+- `SchedulerResult<uint32_t> addJob(...)`
+- `SchedulerResult<uint32_t> addJobOnceUtc(...)`
+- `SchedulerResult<void> cancelJob(...)`, `pauseJob(...)`, `resumeJob(...)`, `cancelAll()`
+- `void tick()` / `tick(nowUtc)` for manual mode
+- `SchedulerResult<size_t> jobCount() const`
+- `SchedulerResult<void> getJobInfo(jobId, out) const`
+- `SchedulerResult<uint8_t> registerExecutor(ISchedulerExecutor*)` before `begin()`
+- `uint8_t defaultWorkerExecutor() const`
+- `uint8_t defaultDedicatedExecutor() const`
+
+### Scheduling types
+- `ScheduleField`: `any()`, `only()`, `range()`, `every()`, `rangeEvery()`, `list()`
+- `Schedule`: `onceUtc`, `dailyAtLocal`, `weeklyAtLocal`, `monthlyOnDayLocal`, `sunrise`, `sunset`, `moonPhase`, `moonPhaseAngle`, `moonIlluminationPercent`, `custom`
+
+### Dispatch and overlap
+```cpp
+JobOptions options{};
+options.dispatch = DispatchPolicy::Async;
+options.overlap = OverlapPolicy::SkipIfRunning;
+options.executorId = scheduler.defaultWorkerExecutor();
+options.name = "db-sync";
+```
+
+### Dedicated-task opt-in
+```cpp
+DedicatedTaskOptions task{};
+task.name = "isolated-job";
+task.stackSize = 8192;
+task.priority = 2;
+
+JobOptions options{};
+options.dispatch = DispatchPolicy::Async;
+options.executorId = scheduler.defaultDedicatedExecutor();
+options.dedicatedTask = &task;
+```
+
+## Executor Model
+- `InlineExecutor`: runs in scheduler context.
+- `WorkerPoolExecutor`: default async executor for ESP32.
+- `ESPWorkerExecutorAdapter`: bridges to an existing `ESPWorker`.
+- `DedicatedTaskExecutor`: advanced opt-in path, also used by the v1 compatibility wrapper for per-job task config.
+
+## Time Semantics
+- Recurring schedules are evaluated in local time.
+- One-shot UTC schedules stay exact.
+- `dayOfMonth` and `dayOfWeek` follow classic cron OR semantics.
+- Moon helpers trigger on crossings with tolerance windows.
+- The scheduler idles until `now >= minValidUnixSeconds`.
+
+## Examples
+- `examples/v2_manual_inline`
+- `examples/v2_background_worker_pool`
+- `examples/v2_espworker_adapter`
+- `examples/v2_shutdown`
+- `examples/v1_compat_wrapper`
+
+The older v1-style sketches are still present and routed through `ESPSchedulerV1Compat`.
+
+## v1 Compatibility
+`ESPSchedulerV1Compat` preserves the old shape:
+- `SchedulerJobMode::Inline` maps to v2 inline dispatch.
+- `SchedulerJobMode::WorkerTask` maps to async dispatch.
+- Per-job `SchedulerTaskConfig` is routed through the dedicated-task executor.
+- `deinit()`, `cleanup()`, and index-based `getJobInfo()` remain available on the compatibility wrapper.
+
+## Testing
+- Device Unity tests live under `test/test_esp_scheduler`.
+- CI builds all examples with PlatformIO and Arduino CLI.
 
 ## License
-MIT — see `LICENSE.md`.
+ESPScheduler is released under the [MIT License](LICENSE.md).
 
 ## ESPToolKit
-- Check out other libraries: https://github.com/orgs/ESPToolKit/repositories
-- Hang out on Discord: https://discord.gg/WG8sSqAy
-- Support the project: https://ko-fi.com/esptoolkit
-- Visit the website: https://www.esptoolkit.hu/
+- Website: <https://www.esptoolkit.hu/>
+- GitHub: <https://github.com/ESPToolKit>
+- Support: <https://ko-fi.com/esptoolkit>
