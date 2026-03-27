@@ -6,7 +6,12 @@
 #include "task_support.h"
 
 namespace {
-bool postCompletion(const std::shared_ptr<SchedulerExecutorRuntime> &runtime, uint32_t jobId, uint32_t generation) {
+bool postCompletion(
+    const std::shared_ptr<SchedulerExecutorRuntime> &runtime,
+    uint32_t jobId,
+    uint32_t generation,
+    size_t slotIndex
+) {
 	if (!runtime || !runtime->accepting.load() || runtime->eventQueue == nullptr) {
 		return false;
 	}
@@ -14,6 +19,7 @@ bool postCompletion(const std::shared_ptr<SchedulerExecutorRuntime> &runtime, ui
 	event.kind = SchedulerEventKind::JobFinished;
 	event.jobId = jobId;
 	event.generation = generation;
+	event.slotIndex = slotIndex;
 	return xQueueSend(runtime->eventQueue, &event, 0) == pdTRUE;
 }
 } // namespace
@@ -174,7 +180,12 @@ void WorkerPoolExecutor::workerTaskEntry(void *arg) {
 		}
 
 		item->invocation.callback.invoke();
-		postCompletion(owner->runtime_, item->invocation.jobId, item->invocation.generation);
+		postCompletion(
+		    owner->runtime_,
+		    item->invocation.jobId,
+		    item->invocation.generation,
+		    item->invocation.slotIndex
+		);
 		delete item;
 	}
 

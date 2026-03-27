@@ -6,6 +6,7 @@
 #include "core/scheduler_core.h"
 #include "core/runtime_containers.h"
 #include "executors/dedicated_task_executor.h"
+#include "executors/esp_worker_executor.h"
 #include "executors/inline_executor.h"
 #include "executors/worker_pool_executor.h"
 #include "service/scheduler_commands.h"
@@ -72,17 +73,34 @@ struct ESPScheduler::Impl : public IExecutorResolver {
 
 	bool startExecutors() {
 		inlineDispatch.reset(new (std::nothrow) InlineExecutor());
-		workerPool.reset(new (std::nothrow) WorkerPoolExecutor(config.defaultWorkerPool));
 		dedicatedTask.reset(new (std::nothrow) DedicatedTaskExecutor());
-		if (!inlineDispatch || !workerPool || !dedicatedTask) {
+		if (!inlineDispatch || !dedicatedTask) {
 			return false;
+		}
+		if (config.defaultAsyncBackend == AsyncExecutorBackend::WorkerPool) {
+			workerPool.reset(new (std::nothrow) WorkerPoolExecutor(config.defaultWorkerPool));
+			if (!workerPool) {
+				return false;
+			}
+		} else {
+			if (!config.espWorker) {
+				return false;
+			}
+			espWorkerAdapter.reset(new (std::nothrow) ESPWorkerExecutorAdapter(*config.espWorker));
+			if (!espWorkerAdapter) {
+				return false;
+			}
 		}
 		if (!inlineDispatch->begin(runtime)) {
 			return false;
 		}
 
 		executors.clear();
-		if (!executors.pushBack(workerPool.get())) {
+		ISchedulerExecutor *asyncExecutor =
+		    config.defaultAsyncBackend == AsyncExecutorBackend::ESPWorker
+		        ? static_cast<ISchedulerExecutor *>(espWorkerAdapter.get())
+		        : static_cast<ISchedulerExecutor *>(workerPool.get());
+		if (!executors.pushBack(asyncExecutor)) {
 			return false;
 		}
 		if (!executors.pushBack(dedicatedTask.get())) {
@@ -115,6 +133,7 @@ struct ESPScheduler::Impl : public IExecutorResolver {
 			inlineDispatch->end(drainRunningJobs);
 		}
 		inlineDispatch.reset();
+		espWorkerAdapter.reset();
 		dedicatedTask.reset();
 		workerPool.reset();
 	}
@@ -138,6 +157,7 @@ struct ESPScheduler::Impl : public IExecutorResolver {
 	std::unique_ptr<SchedulerService> service{};
 	std::unique_ptr<InlineExecutor> inlineDispatch{};
 	std::unique_ptr<WorkerPoolExecutor> workerPool{};
+	std::unique_ptr<ESPWorkerExecutorAdapter> espWorkerAdapter{};
 	std::unique_ptr<DedicatedTaskExecutor> dedicatedTask{};
 	SchedulerArray<ISchedulerExecutor *> externalExecutors{};
 	SchedulerArray<ISchedulerExecutor *> executors{};
@@ -543,6 +563,25 @@ int64_t ESPScheduler::minValidUnixSeconds() const {
 		return kDefaultMinValidEpochSeconds;
 	}
 	return impl_->config.minValidEpochSeconds;
+}
+
+uint8_t ESPScheduler::defaultWorkerExecutor() const {
+	if (!impl_ || impl_->config.defaultAsyncBackend != AsyncExecutorBackend::WorkerPool) {
+		return kInvalidExecutorId;
+	}
+	return 0;
+}
+
+uint8_t ESPScheduler::defaultESPWorkerExecutor() const {
+	if (!impl_ || impl_->config.defaultAsyncBackend != AsyncExecutorBackend::ESPWorker ||
+	    impl_->config.espWorker == nullptr) {
+		return kInvalidExecutorId;
+	}
+	return 0;
+}
+
+uint8_t ESPScheduler::defaultDedicatedExecutor() const {
+	return 1;
 }
 
 bool ESPScheduler::computeNextOccurrence(

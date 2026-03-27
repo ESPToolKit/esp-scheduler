@@ -21,6 +21,7 @@ ESPScheduler v2 is a C++17 scheduler for ESP32 firmware that keeps the cron-styl
 - `DispatchPolicy::Inline` or `DispatchPolicy::Async`.
 - `OverlapPolicy::SkipIfRunning`, `QueueOne`, and `AllowParallel`.
 - Built-in worker-pool executor, dedicated-task executor, and `ESPWorkerExecutorAdapter`.
+- Optional built-in `ESPWorker` async backend via config when you want scheduler-managed integration without manual executor registration.
 - Deterministic lifecycle with `begin()` / `end()`.
 - Clock validity guard via `setMinValidUnixSeconds()` / `setMinValidUtc()`.
 - `usePSRAMMetadata` routes scheduler-owned job metadata, slot storage, and due-heap buffers through the scheduler allocator.
@@ -122,6 +123,7 @@ void loop() {
 - `SchedulerResult<void> getJobInfo(jobId, out) const`
 - `SchedulerResult<uint8_t> registerExecutor(ISchedulerExecutor*)` before `begin()`
 - `uint8_t defaultWorkerExecutor() const`
+- `uint8_t defaultESPWorkerExecutor() const`
 - `uint8_t defaultDedicatedExecutor() const`
 
 ### Scheduling types
@@ -135,6 +137,21 @@ options.dispatch = DispatchPolicy::Async;
 options.overlap = OverlapPolicy::SkipIfRunning;
 options.executorId = scheduler.defaultWorkerExecutor();
 options.name = "db-sync";
+```
+
+### Built-in ESPWorker opt-in
+```cpp
+ESPWorker worker;
+
+SchedulerConfig config{};
+config.defaultAsyncBackend = AsyncExecutorBackend::ESPWorker;
+config.espWorker = &worker;
+
+ESPScheduler scheduler(date, config);
+
+JobOptions options{};
+options.dispatch = DispatchPolicy::Async;
+options.executorId = scheduler.defaultESPWorkerExecutor();
 ```
 
 ### Dedicated-task opt-in
@@ -153,14 +170,17 @@ options.dedicatedTask = &task;
 ## Executor Model
 - `InlineExecutor`: runs in scheduler context.
 - `WorkerPoolExecutor`: default async executor for ESP32.
+- `AsyncExecutorBackend::ESPWorker`: optional built-in async backend when configured with `SchedulerConfig::espWorker`.
 - `ESPWorkerExecutorAdapter`: bridges to an existing `ESPWorker`.
 - `DedicatedTaskExecutor`: advanced opt-in path, also used by the v1 compatibility wrapper for per-job task config.
 
 ## Memory And Shutdown Notes
 - Scheduler-owned runtime metadata now uses explicit non-throwing allocation paths and reports `SchedulerError::NoMemory` on API paths that can fail cleanly.
+- Job lookup and completion bookkeeping are direct-indexed internally, and jobs waiting for schedule recomputation are tracked explicitly instead of being recovered by scanning the whole job table each wake cycle.
 - Queue submission in background mode returns `QueueFull` if the command queue has no space; `Timeout` is reserved for commands that were accepted but not acknowledged within the control timeout.
 - `end(false)` stops intake, detaches completion routing, and tears down scheduler-owned resources without waiting for async callbacks to finish posting back into the core.
 - `end(true)` cancels pending work, drains active async completions, then stops executors and the background service.
+- Worker-pool and service shutdown still use force-delete after timeout as a deliberate best-effort fallback for stuck tasks; that path is documented behavior, not graceful draining.
 
 ## Time Semantics
 - Recurring schedules are evaluated in local time.

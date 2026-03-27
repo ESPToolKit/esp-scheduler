@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ESPDate.h>
+#include <ESPWorker.h>
 #include <ESPScheduler.h>
 #include <cmath>
 #include <cstdlib>
@@ -91,6 +92,7 @@ class TestQueueExecutor : public ISchedulerExecutor {
 		event.kind = SchedulerEventKind::JobFinished;
 		event.jobId = invocation.jobId;
 		event.generation = invocation.generation;
+		event.slotIndex = invocation.slotIndex;
 		TEST_ASSERT_NOT_NULL(runtime_->eventQueue);
 		TEST_ASSERT_EQUAL(pdTRUE, xQueueSend(runtime_->eventQueue, &event, 0));
 	}
@@ -213,6 +215,30 @@ static void test_pause_resume_cancel_and_job_count() {
 	TEST_ASSERT_TRUE(scheduler.resumeJob(first.value).ok());
 	TEST_ASSERT_TRUE(scheduler.cancelJob(second.value).ok());
 	TEST_ASSERT_EQUAL(static_cast<size_t>(1), scheduler.jobCount().value);
+}
+
+static void test_slot_reuse_keeps_old_job_id_invalid() {
+	ESPScheduler local(date, manualConfig());
+	TEST_ASSERT_TRUE(local.begin());
+
+	JobOptions options{};
+	SchedulerResult<uint32_t> first =
+	    local.addJobOnceUtc(date.fromUtc(2025, 1, 1, 6, 0, 0), options, &inlineCallback, nullptr);
+	TEST_ASSERT_TRUE(first.ok());
+
+	local.tick(date.fromUtc(2025, 1, 1, 6, 0, 0));
+	JobInfo info{};
+	TEST_ASSERT_EQUAL(SchedulerError::NotFound, local.getJobInfo(first.value, info).error);
+
+	SchedulerResult<uint32_t> second =
+	    local.addJob(Schedule::dailyAtLocal(7, 0), options, &inlineCallback, nullptr);
+	TEST_ASSERT_TRUE(second.ok());
+	TEST_ASSERT_TRUE(first.value != second.value);
+
+	local.tick(date.fromUtc(2025, 1, 1, 6, 1, 0));
+	TEST_ASSERT_TRUE(local.getJobInfo(second.value, info).ok());
+	TEST_ASSERT_EQUAL(second.value, info.id);
+	local.end(true);
 }
 
 static void test_executor_unavailable_is_reported() {
@@ -439,6 +465,31 @@ static void test_background_async_runs_without_tick() {
 	background.end(true);
 }
 
+static void test_begin_fails_for_missing_builtin_espworker() {
+	SchedulerConfig config = manualConfig();
+	config.defaultAsyncBackend = AsyncExecutorBackend::ESPWorker;
+	config.espWorker = nullptr;
+	ESPScheduler local(date, config);
+	TEST_ASSERT_FALSE(local.begin());
+	TEST_ASSERT_EQUAL(ESPScheduler::kInvalidExecutorId, local.defaultESPWorkerExecutor());
+}
+
+static void test_builtin_espworker_executor_id_available_when_configured() {
+	ESPWorker worker;
+	ESPWorker::Config workerConfig{};
+	worker.init(workerConfig);
+
+	SchedulerConfig config = manualConfig();
+	config.defaultAsyncBackend = AsyncExecutorBackend::ESPWorker;
+	config.espWorker = &worker;
+	ESPScheduler local(date, config);
+	TEST_ASSERT_EQUAL(0, local.defaultESPWorkerExecutor());
+	TEST_ASSERT_EQUAL(ESPScheduler::kInvalidExecutorId, local.defaultWorkerExecutor());
+	TEST_ASSERT_TRUE(local.begin());
+	local.end(true);
+	worker.deinit();
+}
+
 static void test_v1_compat_cleanup_prunes_canceled_jobs() {
 	ESPSchedulerV1Compat compat(date);
 	uint32_t jobId = compat.addJob(Schedule::dailyAtLocal(6, 0), SchedulerJobMode::Inline, &inlineCallback);
@@ -529,6 +580,7 @@ void setup() {
 	RUN_TEST(test_get_job_info_reports_next_run_by_job_id);
 	RUN_TEST(test_tick_waits_until_clock_valid_and_primes_once);
 	RUN_TEST(test_pause_resume_cancel_and_job_count);
+	RUN_TEST(test_slot_reuse_keeps_old_job_id_invalid);
 	RUN_TEST(test_executor_unavailable_is_reported);
 	RUN_TEST(test_sunrise_next_occurrence_with_offsets);
 	RUN_TEST(test_sunset_next_occurrence_with_offsets);
@@ -540,6 +592,8 @@ void setup() {
 	RUN_TEST(test_allow_parallel_behavior);
 	RUN_TEST(test_cancel_running_async_job_and_stale_completion_is_ignored);
 	RUN_TEST(test_background_async_runs_without_tick);
+	RUN_TEST(test_begin_fails_for_missing_builtin_espworker);
+	RUN_TEST(test_builtin_espworker_executor_id_available_when_configured);
 	RUN_TEST(test_end_wait_true_drains_manual_async_invocation);
 	RUN_TEST(test_end_wait_false_returns_without_drain);
 	RUN_TEST(test_begin_fails_for_invalid_service_stack_size);

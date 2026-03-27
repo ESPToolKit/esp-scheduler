@@ -8,9 +8,16 @@ extern "C" {
 
 #include <cstdint>
 
+class ESPWorker;
+
 enum class SchedulerMode : uint8_t {
 	Manual = 0,
 	Background,
+};
+
+enum class AsyncExecutorBackend : uint8_t {
+	WorkerPool = 0,
+	ESPWorker,
 };
 
 enum class DispatchPolicy : uint8_t {
@@ -55,6 +62,8 @@ struct SchedulerConfig {
 	SchedulerMode mode = SchedulerMode::Background;
 	int64_t minValidEpochSeconds = 1577836800;
 	bool usePSRAMMetadata = false;
+	AsyncExecutorBackend defaultAsyncBackend = AsyncExecutorBackend::WorkerPool;
+	ESPWorker *espWorker = nullptr;
 	SchedulerServiceConfig service{};
 	WorkerPoolConfig defaultWorkerPool{};
 	DedicatedTaskOptions defaultDedicatedTask{};

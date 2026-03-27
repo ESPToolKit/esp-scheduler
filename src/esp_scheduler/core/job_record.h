@@ -20,9 +20,11 @@ struct JobRecord {
 	bool canceled = false;
 	bool queuedWhileRunning = false;
 	bool hasNext = false;
+	bool pendingSchedule = false;
 	uint16_t runningCount = 0;
 
 	DateTime nextRunUtc{};
+	DateTime scheduleFromUtc{};
 	CallbackRef callback{};
 	SchedulerOwnedString name{};
 	DedicatedTaskOptions dedicatedTask{};

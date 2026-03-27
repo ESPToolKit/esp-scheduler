@@ -32,13 +32,18 @@ class SchedulerCore {
 	    const SchedulerEvent &event, const DateTime &nowUtc, IExecutorResolver &executors
 	);
 
-	bool nextDueEpoch(int64_t &outEpochSeconds) const;
+	bool nextDueEpoch(int64_t &outEpochSeconds);
 	size_t activeInvocationCount() const;
 
   private:
 	SchedulerResult<size_t> findJobSlot(uint32_t jobId) const;
 	bool computeNextForJob(JobRecord &record, const DateTime &fromUtc);
 	bool pushDue(size_t slotIndex, const JobRecord &record);
+	bool queueScheduling(size_t slotIndex, const DateTime &fromUtc);
+	void clearScheduling(size_t slotIndex);
+	void drainPendingSchedules(const DateTime &nowUtc);
+	bool validateDueEntry(const DueHeapEntry &entry) const;
+	void pruneInvalidDueEntries();
 	void retireJob(size_t slotIndex);
 	void finalizeCanceledIfIdle(size_t slotIndex);
 	void dispatchDeferredIfNeeded(
@@ -57,5 +62,7 @@ class SchedulerCore {
 	uint32_t nextId_ = 1;
 	SchedulerArray<JobRecord> jobs_{};
 	SchedulerArray<size_t> freeSlots_{};
+	SchedulerArray<size_t> pendingSchedules_{};
+	SchedulerIdIndex jobIndex_{};
 	DueHeap dueHeap_{};
 };

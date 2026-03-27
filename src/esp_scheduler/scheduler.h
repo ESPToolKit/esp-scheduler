@@ -51,6 +51,7 @@ struct JobInfo {
 class ESPScheduler {
   public:
 	static constexpr int64_t kDefaultMinValidEpochSeconds = 1577836800;
+	static constexpr uint8_t kInvalidExecutorId = 0xFF;
 
 	explicit ESPScheduler(ESPDate &date, const SchedulerConfig &config = SchedulerConfig{});
 	~ESPScheduler();
@@ -113,12 +114,9 @@ class ESPScheduler {
 	    const ScheduleSpec &schedule, const DateTime &fromUtc, DateTime &outNextUtc
 	) const;
 
-	uint8_t defaultWorkerExecutor() const {
-		return 0;
-	}
-	uint8_t defaultDedicatedExecutor() const {
-		return 1;
-	}
+	uint8_t defaultWorkerExecutor() const;
+	uint8_t defaultESPWorkerExecutor() const;
+	uint8_t defaultDedicatedExecutor() const;
 
   private:
 	struct Impl;

@@ -8,14 +8,18 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 ### Added
 - Compile-only `examples/v2_api_compile` sketch to exercise the native v2 API surface in CI.
 - Lifecycle and overlap coverage in the Unity test sketch for skip, queue-one, allow-parallel, background no-`tick()`, explicit shutdown, and v1 compatibility cleanup behavior.
+- Optional built-in `ESPWorker` async backend selection through `SchedulerConfig`.
 
 ### Changed
 - CI now runs on every branch push and is split into PlatformIO v2 API builds, PlatformIO example builds, PlatformIO device test sketch builds, Arduino CLI v2 API builds, and Arduino CLI example builds.
 - Background command submission now treats a full control queue as `QueueFull` immediately instead of waiting for the control timeout window.
+- `SchedulerCore` now uses a scheduler-owned job id index, explicit pending-schedule bookkeeping, direct-indexed completion events, and heap-top validation instead of recovering hot-path state through whole-container scans.
 
 ### Fixed
 - Scheduler reschedule paths now clear `hasNext` if a due-heap insertion fails, so jobs are retried on the next dispatch pass instead of getting stuck in a primed-but-undispatchable state.
 - PSRAM task-stack flags are now honored by the scheduler service task, worker-pool executor, and dedicated-task executor when the platform supports external task stacks.
+- Background next-deadline lookup now purges stale heap entries lazily and returns the actual earliest valid due job without scanning the heap.
+- Completion events now validate slot index, job id, and generation directly, which keeps stale completions from touching reused slots.
 
 ## [2.0.0] - 2026-03-27
 ### Added

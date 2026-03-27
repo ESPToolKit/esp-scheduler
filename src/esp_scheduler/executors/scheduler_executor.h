@@ -44,6 +44,7 @@ struct CallbackRef {
 struct JobInvocation {
 	uint32_t jobId = 0;
 	uint32_t generation = 0;
+	size_t slotIndex = 0;
 	const char *name = nullptr;
 	CallbackRef callback{};
 	DedicatedTaskOptions dedicatedTask{};

@@ -14,6 +14,8 @@ SchedulerCore::SchedulerCore(ESPDate &date, int64_t minValidEpochSeconds, bool u
       usePSRAMMetadata_(usePSRAMMetadata),
       jobs_(usePSRAMMetadata),
       freeSlots_(usePSRAMMetadata),
+      pendingSchedules_(usePSRAMMetadata),
+      jobIndex_(usePSRAMMetadata),
       dueHeap_(usePSRAMMetadata) {
 }
 
@@ -30,13 +32,15 @@ bool SchedulerCore::clockValid(const DateTime &nowUtc) const {
 }
 
 SchedulerResult<size_t> SchedulerCore::findJobSlot(uint32_t jobId) const {
-	for (size_t index = 0; index < jobs_.size(); ++index) {
-		const JobRecord &record = jobs_[index];
-		if (record.occupied && !record.canceled && record.id == jobId) {
-			return SchedulerResult<size_t>::success(index);
-		}
+	size_t slotIndex = 0;
+	if (!jobIndex_.get(jobId, slotIndex) || slotIndex >= jobs_.size()) {
+		return SchedulerResult<size_t>::failure(SchedulerError::NotFound);
 	}
-	return SchedulerResult<size_t>::failure(SchedulerError::NotFound);
+	const JobRecord &record = jobs_[slotIndex];
+	if (!record.occupied || record.canceled || record.id != jobId) {
+		return SchedulerResult<size_t>::failure(SchedulerError::NotFound);
+	}
+	return SchedulerResult<size_t>::success(slotIndex);
 }
 
 bool SchedulerCore::computeNextForJob(JobRecord &record, const DateTime &fromUtc) {
@@ -61,16 +65,90 @@ bool SchedulerCore::pushDue(size_t slotIndex, const JobRecord &record) {
 	return dueHeap_.push({record.nextRunUtc.epochSeconds, slotIndex, record.generation});
 }
 
+bool SchedulerCore::queueScheduling(size_t slotIndex, const DateTime &fromUtc) {
+	if (slotIndex >= jobs_.size()) {
+		return false;
+	}
+	JobRecord &record = jobs_[slotIndex];
+	if (!record.occupied || record.canceled || record.paused) {
+		record.pendingSchedule = false;
+		record.hasNext = false;
+		return true;
+	}
+	record.scheduleFromUtc = fromUtc;
+	record.hasNext = false;
+	if (record.pendingSchedule) {
+		return true;
+	}
+	record.pendingSchedule = true;
+	if (!pendingSchedules_.pushBack(slotIndex)) {
+		record.pendingSchedule = false;
+		return false;
+	}
+	return true;
+}
+
+void SchedulerCore::clearScheduling(size_t slotIndex) {
+	if (slotIndex >= jobs_.size()) {
+		return;
+	}
+	JobRecord &record = jobs_[slotIndex];
+	record.pendingSchedule = false;
+	record.hasNext = false;
+}
+
+void SchedulerCore::drainPendingSchedules(const DateTime &nowUtc) {
+	if (!clockValid(nowUtc)) {
+		return;
+	}
+	while (!pendingSchedules_.empty()) {
+		const size_t slotIndex = pendingSchedules_[pendingSchedules_.size() - 1];
+		pendingSchedules_.popBack();
+		if (slotIndex >= jobs_.size()) {
+			continue;
+		}
+		JobRecord &record = jobs_[slotIndex];
+		record.pendingSchedule = false;
+		if (!record.occupied || record.canceled || record.paused || record.runningCount > 0) {
+			record.hasNext = false;
+			continue;
+		}
+		if (computeNextForJob(record, record.scheduleFromUtc) && !pushDue(slotIndex, record)) {
+			record.hasNext = false;
+		}
+	}
+}
+
+bool SchedulerCore::validateDueEntry(const DueHeapEntry &entry) const {
+	if (entry.slotIndex >= jobs_.size()) {
+		return false;
+	}
+	const JobRecord &record = jobs_[entry.slotIndex];
+	return record.occupied && !record.canceled && record.hasNext &&
+	       record.generation == entry.generation &&
+	       record.nextRunUtc.epochSeconds == entry.nextEpoch;
+}
+
+void SchedulerCore::pruneInvalidDueEntries() {
+	while (!dueHeap_.empty() && !validateDueEntry(dueHeap_.top())) {
+		dueHeap_.pop();
+	}
+}
+
 void SchedulerCore::retireJob(size_t slotIndex) {
 	if (slotIndex >= jobs_.size()) {
 		return;
 	}
 	JobRecord &record = jobs_[slotIndex];
+	if (record.id != 0) {
+		jobIndex_.remove(record.id);
+	}
 	record.occupied = false;
 	record.canceled = false;
 	record.paused = false;
 	record.queuedWhileRunning = false;
 	record.hasNext = false;
+	record.pendingSchedule = false;
 	record.runningCount = 0;
 	record.callback = makeEmptyCallback();
 	record.name.clear();
@@ -124,10 +202,12 @@ SchedulerResult<uint32_t> SchedulerCore::addJob(
 
 	size_t slotIndex = 0;
 	bool reusedSlot = false;
+	uint32_t reusedGeneration = 0;
 	if (!freeSlots_.empty()) {
 		slotIndex = freeSlots_[freeSlots_.size() - 1];
 		freeSlots_.popBack();
-		record.generation = jobs_[slotIndex].generation;
+		reusedGeneration = jobs_[slotIndex].generation;
+		record.generation = reusedGeneration;
 		jobs_[slotIndex] = std::move(record);
 		reusedSlot = true;
 	} else {
@@ -137,9 +217,14 @@ SchedulerResult<uint32_t> SchedulerCore::addJob(
 		}
 	}
 
-	if (!pushDue(slotIndex, jobs_[slotIndex])) {
+	if (!jobIndex_.set(jobs_[slotIndex].id, slotIndex) ||
+	    (!jobs_[slotIndex].paused && !queueScheduling(slotIndex, nowUtc))) {
+		jobIndex_.remove(jobs_[slotIndex].id);
 		if (reusedSlot) {
-			jobs_[slotIndex] = JobRecord(usePSRAMMetadata_);
+			JobRecord empty(usePSRAMMetadata_);
+			empty.generation = reusedGeneration;
+			jobs_[slotIndex] = std::move(empty);
+			freeSlots_.pushBack(slotIndex);
 		} else {
 			jobs_.popBack();
 		}
@@ -157,7 +242,7 @@ SchedulerResult<void> SchedulerCore::cancelJob(uint32_t jobId) {
 	record.canceled = true;
 	record.paused = false;
 	record.queuedWhileRunning = false;
-	record.hasNext = false;
+	clearScheduling(slotResult.value);
 	finalizeCanceledIfIdle(slotResult.value);
 	return SchedulerResult<void>::success();
 }
@@ -170,7 +255,7 @@ SchedulerResult<void> SchedulerCore::pauseJob(uint32_t jobId) {
 	JobRecord &record = jobs_[slotResult.value];
 	record.paused = true;
 	record.queuedWhileRunning = false;
-	record.hasNext = false;
+	clearScheduling(slotResult.value);
 	return SchedulerResult<void>::success();
 }
 
@@ -182,12 +267,8 @@ SchedulerResult<void> SchedulerCore::resumeJob(uint32_t jobId, const DateTime &n
 	JobRecord &record = jobs_[slotResult.value];
 	record.paused = false;
 	record.queuedWhileRunning = false;
-	if (clockValid(nowUtc) && record.runningCount == 0) {
-		computeNextForJob(record, nowUtc);
-		if (!pushDue(slotResult.value, record)) {
-			record.hasNext = false;
-			return SchedulerResult<void>::failure(SchedulerError::NoMemory);
-		}
+	if (record.runningCount == 0 && !queueScheduling(slotResult.value, nowUtc)) {
+		return SchedulerResult<void>::failure(SchedulerError::NoMemory);
 	}
 	return SchedulerResult<void>::success();
 }
@@ -201,7 +282,7 @@ SchedulerResult<void> SchedulerCore::cancelAll() {
 		record.canceled = true;
 		record.paused = false;
 		record.queuedWhileRunning = false;
-		record.hasNext = false;
+		clearScheduling(index);
 		finalizeCanceledIfIdle(index);
 	}
 	return SchedulerResult<void>::success();
@@ -256,6 +337,7 @@ void SchedulerCore::dispatchOne(
 	JobInvocation invocation{};
 	invocation.jobId = record.id;
 	invocation.generation = record.generation;
+	invocation.slotIndex = slotIndex;
 	invocation.name = record.name.empty() ? nullptr : record.name.c_str();
 	invocation.callback = record.callback;
 	invocation.dedicatedTask =
@@ -282,7 +364,7 @@ void SchedulerCore::dispatchOne(
 			record.hasNext = false;
 		}
 		if (!executor->submit(invocation)) {
-			record.runningCount--;
+		record.runningCount--;
 			record.hasNext = true;
 			record.nextRunUtc = date_.addSeconds(nowUtc, kRetryDelaySeconds);
 			if (!pushDue(slotIndex, record)) {
@@ -383,11 +465,7 @@ void SchedulerCore::handleCompletion(
 
 	if (record.runningCount == 0 && !record.paused && !record.hasNext &&
 	    !(record.schedule.isOneShot || record.schedule.kind == ScheduleKind::OneShotUtc)) {
-		if (computeNextForJob(record, nowUtc)) {
-			if (!pushDue(slotIndex, record)) {
-				record.hasNext = false;
-			}
-		}
+		(void)queueScheduling(slotIndex, nowUtc);
 	}
 
 	if (record.runningCount == 0 && !record.hasNext &&
@@ -400,32 +478,19 @@ void SchedulerCore::dispatchDue(const DateTime &nowUtc, IExecutorResolver &execu
 	if (!clockValid(nowUtc)) {
 		return;
 	}
-	for (size_t index = 0; index < jobs_.size(); ++index) {
-		JobRecord &record = jobs_[index];
-		if (!record.occupied || record.canceled || record.paused || record.runningCount > 0 ||
-		    record.hasNext || record.queuedWhileRunning) {
-			continue;
-		}
-		if (computeNextForJob(record, nowUtc)) {
-			if (!pushDue(index, record)) {
-				record.hasNext = false;
-			}
-		}
-	}
+	drainPendingSchedules(nowUtc);
+	pruneInvalidDueEntries();
 	while (!dueHeap_.empty()) {
+		pruneInvalidDueEntries();
+		if (dueHeap_.empty()) {
+			break;
+		}
 		const DueHeapEntry entry = dueHeap_.top();
 		if (entry.nextEpoch > nowUtc.epochSeconds) {
 			break;
 		}
 		dueHeap_.pop();
-		if (entry.slotIndex >= jobs_.size()) {
-			continue;
-		}
 		JobRecord &record = jobs_[entry.slotIndex];
-		if (!record.occupied || record.canceled || record.generation != entry.generation ||
-		    !record.hasNext || record.nextRunUtc.epochSeconds != entry.nextEpoch) {
-			continue;
-		}
 		if (record.paused) {
 			record.hasNext = false;
 			continue;
@@ -447,42 +512,23 @@ void SchedulerCore::handleEvent(
 	if (event.kind != SchedulerEventKind::JobFinished) {
 		return;
 	}
-
-	for (size_t index = 0; index < jobs_.size(); ++index) {
-		JobRecord &record = jobs_[index];
-		if (!record.occupied) {
-			continue;
-		}
-		if (record.id == event.jobId && record.generation == event.generation) {
-			handleCompletion(index, nowUtc, executors);
-			return;
-		}
+	if (event.slotIndex >= jobs_.size()) {
+		return;
 	}
+	const JobRecord &record = jobs_[event.slotIndex];
+	if (!record.occupied || record.id != event.jobId || record.generation != event.generation) {
+		return;
+	}
+	handleCompletion(event.slotIndex, nowUtc, executors);
 }
 
-bool SchedulerCore::nextDueEpoch(int64_t &outEpochSeconds) const {
-	bool found = false;
-	int64_t nextEpoch = 0;
-	for (size_t index = 0; index < dueHeap_.size(); ++index) {
-		const DueHeapEntry &entry = dueHeap_.at(index);
-		if (entry.slotIndex >= jobs_.size()) {
-			continue;
-		}
-		const JobRecord &record = jobs_[entry.slotIndex];
-		if (!record.occupied || record.canceled || !record.hasNext ||
-		    record.generation != entry.generation ||
-		    record.nextRunUtc.epochSeconds != entry.nextEpoch) {
-			continue;
-		}
-		if (!found || entry.nextEpoch < nextEpoch) {
-			nextEpoch = entry.nextEpoch;
-			found = true;
-		}
+bool SchedulerCore::nextDueEpoch(int64_t &outEpochSeconds) {
+	pruneInvalidDueEntries();
+	if (dueHeap_.empty()) {
+		return false;
 	}
-	if (found) {
-		outEpochSeconds = nextEpoch;
-	}
-	return found;
+	outEpochSeconds = dueHeap_.top().nextEpoch;
+	return true;
 }
 
 size_t SchedulerCore::activeInvocationCount() const {

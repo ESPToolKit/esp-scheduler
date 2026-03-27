@@ -3,8 +3,6 @@
 #include <ESPWorker.h>
 #include <ESPScheduler.h>
 
-#include "esp_scheduler/executors/esp_worker_executor.h"
-
 namespace {
 class CompileOnlyExecutor : public ISchedulerExecutor {
   public:
@@ -34,7 +32,6 @@ class CompileOnlyExecutor : public ISchedulerExecutor {
 ESPDate date;
 ESPWorker worker;
 CompileOnlyExecutor extraExecutor;
-ESPWorkerExecutorAdapter workerAdapter(worker);
 
 void rawCallback(void *userData) {
 	(void)userData;
@@ -44,6 +41,8 @@ SchedulerConfig makeSchedulerConfig() {
 	SchedulerConfig config{};
 	config.mode = SchedulerMode::Manual;
 	config.usePSRAMMetadata = true;
+	config.defaultAsyncBackend = AsyncExecutorBackend::ESPWorker;
+	config.espWorker = &worker;
 	config.service.usePsramStack = false;
 	config.defaultWorkerPool.usePsramStack = false;
 	config.defaultDedicatedTask.usePsramStack = false;
@@ -62,9 +61,7 @@ void setup() {
 	worker.init(workerConfig);
 
 	SchedulerResult<uint8_t> compileExecutorId = scheduler.registerExecutor(&extraExecutor);
-	SchedulerResult<uint8_t> workerExecutorId = scheduler.registerExecutor(&workerAdapter);
 	(void)compileExecutorId;
-	(void)workerExecutorId;
 
 	scheduler.begin();
 	scheduler.setMinValidUnixSeconds(0);
@@ -75,9 +72,9 @@ void setup() {
 
 	JobOptions asyncOptions{};
 	asyncOptions.dispatch = DispatchPolicy::Async;
-	asyncOptions.executorId = scheduler.defaultWorkerExecutor();
+	asyncOptions.executorId = scheduler.defaultESPWorkerExecutor();
 	asyncOptions.overlap = OverlapPolicy::QueueOne;
-	asyncOptions.name = "worker-pool";
+	asyncOptions.name = "esp-worker";
 	(void)scheduler.addJobOnceUtc(
 	    date.fromUtc(2026, 1, 1, 12, 0, 0),
 	    asyncOptions,
@@ -98,7 +95,7 @@ void setup() {
 	JobOptions customExecutorOptions{};
 	customExecutorOptions.dispatch = DispatchPolicy::Async;
 	customExecutorOptions.executorId = compileExecutorId.ok() ? compileExecutorId.value
-	                                                         : scheduler.defaultWorkerExecutor();
+	                                                         : scheduler.defaultESPWorkerExecutor();
 	(void)scheduler.addJob(
 	    Schedule::custom(
 	        ScheduleField::only(0),

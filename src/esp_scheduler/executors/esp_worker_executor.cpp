@@ -5,7 +5,12 @@
 #include "../service/scheduler_events.h"
 
 namespace {
-bool postCompletion(const std::shared_ptr<SchedulerExecutorRuntime> &runtime, uint32_t jobId, uint32_t generation) {
+bool postCompletion(
+    const std::shared_ptr<SchedulerExecutorRuntime> &runtime,
+    uint32_t jobId,
+    uint32_t generation,
+    size_t slotIndex
+) {
 	if (!runtime || !runtime->accepting.load() || runtime->eventQueue == nullptr) {
 		return false;
 	}
@@ -13,6 +18,7 @@ bool postCompletion(const std::shared_ptr<SchedulerExecutorRuntime> &runtime, ui
 	event.kind = SchedulerEventKind::JobFinished;
 	event.jobId = jobId;
 	event.generation = generation;
+	event.slotIndex = slotIndex;
 	return xQueueSend(runtime->eventQueue, &event, 0) == pdTRUE;
 }
 } // namespace
@@ -39,7 +45,12 @@ bool ESPWorkerExecutorAdapter::submit(const JobInvocation &invocation) {
 	WorkerResult result = worker_.spawn(
 	    [invocation, runtime]() {
 		    invocation.callback.invoke();
-		    postCompletion(runtime, invocation.jobId, invocation.generation);
+		    postCompletion(
+		        runtime,
+		        invocation.jobId,
+		        invocation.generation,
+		        invocation.slotIndex
+		    );
 	    },
 	    config
 	);

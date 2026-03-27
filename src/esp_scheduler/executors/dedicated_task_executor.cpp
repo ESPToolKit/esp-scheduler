@@ -6,7 +6,12 @@
 #include "task_support.h"
 
 namespace {
-bool postCompletion(const std::shared_ptr<SchedulerExecutorRuntime> &runtime, uint32_t jobId, uint32_t generation) {
+bool postCompletion(
+    const std::shared_ptr<SchedulerExecutorRuntime> &runtime,
+    uint32_t jobId,
+    uint32_t generation,
+    size_t slotIndex
+) {
 	if (!runtime || !runtime->accepting.load() || runtime->eventQueue == nullptr) {
 		return false;
 	}
@@ -14,6 +19,7 @@ bool postCompletion(const std::shared_ptr<SchedulerExecutorRuntime> &runtime, ui
 	event.kind = SchedulerEventKind::JobFinished;
 	event.jobId = jobId;
 	event.generation = generation;
+	event.slotIndex = slotIndex;
 	return xQueueSend(runtime->eventQueue, &event, 0) == pdTRUE;
 }
 } // namespace
@@ -73,7 +79,12 @@ void DedicatedTaskExecutor::taskEntry(void *arg) {
 	}
 
 	context->invocation.callback.invoke();
-	postCompletion(context->invocation.runtime, context->invocation.jobId, context->invocation.generation);
+	postCompletion(
+	    context->invocation.runtime,
+	    context->invocation.jobId,
+	    context->invocation.generation,
+	    context->invocation.slotIndex
+	);
 	const bool createdWithCaps = context->createdWithCaps;
 	delete context;
 	scheduler_task_support::deleteCurrentTask(createdWithCaps);
