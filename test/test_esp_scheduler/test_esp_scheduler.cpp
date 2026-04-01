@@ -465,6 +465,71 @@ static void test_background_async_runs_without_tick() {
 	background.end(true);
 }
 
+static void test_background_multiple_add_job_commands_do_not_corrupt_command_lifetime() {
+	SchedulerConfig config{};
+	config.mode = SchedulerMode::Background;
+	ESPScheduler background(date, config);
+	TEST_ASSERT_TRUE(background.begin());
+	background.setMinValidUnixSeconds(0);
+
+	JobOptions options{};
+	SchedulerResult<uint32_t> recurring =
+	    background.addJob(Schedule::dailyAtLocal(6, 0), options, &inlineCallback, nullptr);
+	SchedulerResult<uint32_t> oneShot = background.addJobOnceUtc(
+	    date.addSeconds(date.now(), 60),
+	    options,
+	    &inlineCallback,
+	    nullptr
+	);
+
+	TEST_ASSERT_TRUE(recurring.ok());
+	TEST_ASSERT_TRUE(oneShot.ok());
+
+	SchedulerResult<size_t> count = background.jobCount();
+	TEST_ASSERT_TRUE(count.ok());
+	TEST_ASSERT_EQUAL(static_cast<size_t>(2), count.value);
+
+	background.end(true);
+}
+
+static void test_background_command_roundtrip_stress() {
+	SchedulerConfig config{};
+	config.mode = SchedulerMode::Background;
+	ESPScheduler background(date, config);
+	TEST_ASSERT_TRUE(background.begin());
+	background.setMinValidUnixSeconds(0);
+
+	JobOptions options{};
+	for (uint32_t iteration = 0; iteration < 64; ++iteration) {
+		SchedulerResult<uint32_t> added = background.addJobOnceUtc(
+		    date.addSeconds(date.now(), static_cast<int32_t>(iteration + 60)),
+		    options,
+		    &inlineCallback,
+		    nullptr
+		);
+		TEST_ASSERT_TRUE(added.ok());
+
+		JobInfo info{};
+		SchedulerResult<void> infoResult = background.getJobInfo(added.value, info);
+		TEST_ASSERT_TRUE(infoResult.ok());
+		TEST_ASSERT_EQUAL(added.value, info.id);
+		TEST_ASSERT_TRUE(info.hasNext);
+
+		SchedulerResult<size_t> count = background.jobCount();
+		TEST_ASSERT_TRUE(count.ok());
+		TEST_ASSERT_EQUAL(static_cast<size_t>(1), count.value);
+
+		SchedulerResult<void> cancelResult = background.cancelJob(added.value);
+		TEST_ASSERT_TRUE(cancelResult.ok());
+
+		SchedulerResult<size_t> afterCancel = background.jobCount();
+		TEST_ASSERT_TRUE(afterCancel.ok());
+		TEST_ASSERT_EQUAL(static_cast<size_t>(0), afterCancel.value);
+	}
+
+	background.end(true);
+}
+
 static void test_begin_fails_for_missing_builtin_espworker() {
 	SchedulerConfig config = manualConfig();
 	config.defaultAsyncBackend = AsyncExecutorBackend::ESPWorker;
@@ -591,6 +656,8 @@ void setup() {
 	RUN_TEST(test_queue_one_behavior);
 	RUN_TEST(test_allow_parallel_behavior);
 	RUN_TEST(test_cancel_running_async_job_and_stale_completion_is_ignored);
+	RUN_TEST(test_background_multiple_add_job_commands_do_not_corrupt_command_lifetime);
+	RUN_TEST(test_background_command_roundtrip_stress);
 	RUN_TEST(test_background_async_runs_without_tick);
 	RUN_TEST(test_begin_fails_for_missing_builtin_espworker);
 	RUN_TEST(test_builtin_espworker_executor_id_available_when_configured);

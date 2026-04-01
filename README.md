@@ -178,6 +178,7 @@ options.dedicatedTask = &task;
 - Scheduler-owned runtime metadata now uses explicit non-throwing allocation paths and reports `SchedulerError::NoMemory` on API paths that can fail cleanly.
 - Job lookup and completion bookkeeping are direct-indexed internally, and jobs waiting for schedule recomputation are tracked explicitly instead of being recovered by scanning the whole job table each wake cycle.
 - Queue submission in background mode returns `QueueFull` if the command queue has no space; `Timeout` is reserved for commands that were accepted but not acknowledged within the control timeout.
+- Background control commands use a strict ownership handoff: the caller keeps ownership until `send()` succeeds and may free only after `wait()` returns, while the service frees only abandoned commands chosen before signaling completion.
 - `end(false)` stops intake, detaches completion routing, and tears down scheduler-owned resources without waiting for async callbacks to finish posting back into the core.
 - `end(true)` cancels pending work, drains active async completions, then stops executors and the background service.
 - Worker-pool and service shutdown still use force-delete after timeout as a deliberate best-effort fallback for stuck tasks; that path is documented behavior, not graceful draining.

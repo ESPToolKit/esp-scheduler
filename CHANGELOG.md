@@ -20,6 +20,7 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 - PSRAM task-stack flags are now honored by the scheduler service task, worker-pool executor, and dedicated-task executor when the platform supports external task stacks.
 - Background next-deadline lookup now purges stale heap entries lazily and returns the actual earliest valid due job without scanning the heap.
 - Completion events now validate slot index, job id, and generation directly, which keeps stale completions from touching reused slots.
+- Background command completion now snapshots abandoned ownership before signaling producers, which prevents a use-after-free race during background control command handoff.
 
 ## [2.0.0] - 2026-03-27
 ### Added

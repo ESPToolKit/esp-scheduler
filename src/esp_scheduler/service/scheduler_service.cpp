@@ -103,8 +103,11 @@ void SchedulerService::stop() {
 			if (!pending) {
 				continue;
 			}
+			// Producer owns the command until send() succeeds, then may free it only after wait()
+			// completes. The service may free only abandoned commands, and must decide before signal().
+			const bool shouldDelete = pending->abandoned();
 			pending->signal();
-			if (pending->abandoned()) {
+			if (shouldDelete) {
 				delete pending;
 			}
 		}
@@ -155,8 +158,11 @@ void SchedulerService::drainCommands() {
 			continue;
 		}
 		command->execute(core_, date_, executors_);
+		// Producer owns the command until send() succeeds, then may free it only after wait()
+		// completes. The service may free only abandoned commands, and must decide before signal().
+		const bool shouldDelete = command->abandoned();
 		command->signal();
-		if (command->abandoned()) {
+		if (shouldDelete) {
 			delete command;
 		}
 	}
