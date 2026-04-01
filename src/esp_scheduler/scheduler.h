@@ -99,6 +99,7 @@ class ESPScheduler {
 	SchedulerResult<void> pauseJob(uint32_t jobId);
 	SchedulerResult<void> resumeJob(uint32_t jobId);
 	SchedulerResult<void> cancelAll();
+	SchedulerResult<void> refreshAllSchedules();
 
 	void tick();
 	void tick(const DateTime &nowUtc);

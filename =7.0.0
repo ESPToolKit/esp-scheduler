@@ -1,0 +1,154 @@
+The following files/directories have been created in /tmp/tmptp7h_vrq
+include - Put project header files here
+lib - Put project specific (private) libraries here
+src - Put project source files here
+platformio.ini - Project Configuration File
+Resolving esp32dev dependencies...
+Library Manager: Installing git+https://github.com/ESPToolKit/esp-buffer-manager.git
+git version 2.43.0
+Library Manager: ESPBufferManager@0.1.0+sha.a72e21b has been installed!
+Library Manager: Installing git+https://github.com/ESPToolKit/esp-date.git
+git version 2.43.0
+Library Manager: ESPDate@1.0.2+sha.f455388 has been installed!
+Library Manager: Installing git+https://github.com/ESPToolKit/esp-worker.git
+git version 2.43.0
+Library Manager: ESPWorker@1.0.2+sha.980e521 has been installed!
+Already up-to-date.
+Project has been successfully initialized!
+Processing esp32dev (platform: https://github.com/pioarduino/platform-espressif32.git; board: esp32dev; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32dev.html
+PLATFORM: Espressif 32 (55.3.37+sha.a9fac07) > Espressif ESP32 Dev Module
+HARDWARE: ESP32 240MHz, 320KB RAM, 4MB Flash
+DEBUG: Current (cmsis-dap) External (cmsis-dap, esp-bridge, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - contrib-piohome @ 3.4.4 
+ - framework-arduinoespressif32 @ 3.3.7 
+ - framework-arduinoespressif32-libs @ 5.5.0+sha.87912cd291 
+ - tool-esptoolpy @ 5.1.2 
+ - toolchain-xtensa-esp-elf @ 14.2.0+20251107
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Library Manager: Installing ArduinoJson
+Unpacking 0% 10% 20% 30% 40% 50% 60% 70% 80% 90% 100%
+Library Manager: ArduinoJson@7.4.3 has been installed!
+Found 50 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- ArduinoJson @ 7.4.3
+|-- ESPScheduler @ 2.0.0
+|-- ESPDate @ 1.0.2
+|-- ESPWorker @ 1.0.2
+Building in release mode
+Compiling .pio/build/esp32dev/lib479/ESPBufferManager/esp_buffer_manager/buffer_manager.cpp.o
+Compiling .pio/build/esp32dev/lib1cc/esp-date/esp_date/date.cpp.o
+Compiling .pio/build/esp32dev/lib1cc/esp-date/esp_date/moon.cpp.o
+Compiling .pio/build/esp32dev/lib1cc/esp-date/esp_date/sun.cpp.o
+Compiling .pio/build/esp32dev/lib69d/esp-worker/esp_worker/worker.cpp.o
+Compiling .pio/build/esp32dev/libe94/esp-scheduler/esp_scheduler/compat/v1_compat.cpp.o
+Compiling .pio/build/esp32dev/libe94/esp-scheduler/esp_scheduler/core/scheduler_core.cpp.o
+Compiling .pio/build/esp32dev/libe94/esp-scheduler/esp_scheduler/executors/dedicated_task_executor.cpp.o
+Compiling .pio/build/esp32dev/libe94/esp-scheduler/esp_scheduler/executors/esp_worker_executor.cpp.o
+Compiling .pio/build/esp32dev/libe94/esp-scheduler/esp_scheduler/executors/inline_executor.cpp.o
+Compiling .pio/build/esp32dev/libe94/esp-scheduler/esp_scheduler/executors/worker_pool_executor.cpp.o
+Compiling .pio/build/esp32dev/libe94/esp-scheduler/esp_scheduler/schedule/schedule_calculator.cpp.o
+Compiling .pio/build/esp32dev/libe94/esp-scheduler/esp_scheduler/schedule/schedule_field.cpp.o
+Compiling .pio/build/esp32dev/libe94/esp-scheduler/esp_scheduler/schedule/schedule_spec.cpp.o
+Compiling .pio/build/esp32dev/libe94/esp-scheduler/esp_scheduler/scheduler.cpp.o
+Compiling .pio/build/esp32dev/libe94/esp-scheduler/esp_scheduler/service/scheduler_commands.cpp.o
+Compiling .pio/build/esp32dev/libe94/esp-scheduler/esp_scheduler/service/scheduler_service.cpp.o
+Compiling .pio/build/esp32dev/src/test_esp_scheduler.cpp.o
+Building .pio/build/esp32dev/bootloader.bin
+esptool v5.1.2
+Creating ESP32 image...
+Merged 2 ELF sections.
+Successfully created ESP32 image.
+Generating partitions .pio/build/esp32dev/partitions.bin
+Compiling .pio/build/esp32dev/FrameworkArduino/ColorFormat.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/Esp.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/FirmwareMSC.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/FunctionalInterrupt.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/HEXBuilder.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/HWCDC.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/HardwareSerial.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/HashBuilder.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/IPAddress.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/MD5Builder.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/MacAddress.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/Print.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/Stream.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/StreamString.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/Tone.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/USB.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/USBCDC.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/USBMSC.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/WMath.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/WString.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/base64.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/cbuf.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/chip-debug-report.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-adc.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-bt.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-cpu.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-dac.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-gpio.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-hosted.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-i2c-ng.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-i2c-slave.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-i2c.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-ledc.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-log-wrapper.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-matrix.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-misc.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-periman.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-psram.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-rgb-led.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-rmt.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-sigmadelta.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-spi.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-time.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-timer.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-tinyusb.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-touch-ng.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-touch.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/esp32-hal-uart.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/firmware_msc_fat.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/freertos_stats.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/idf_openthread_mpool_wrapper.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/libb64/cdecode.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/libb64/cencode.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/main.cpp.o
+Compiling .pio/build/esp32dev/FrameworkArduino/stdlib_noniso.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/wiring_pulse.c.o
+Compiling .pio/build/esp32dev/FrameworkArduino/wiring_shift.c.o
+Archiving .pio/build/esp32dev/libFrameworkArduino.a
+Indexing .pio/build/esp32dev/libFrameworkArduino.a
+Linking .pio/build/esp32dev/firmware.elf
+                            Memory Type Usage Summary                             
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Memory Type/Section ┃ Used [bytes] ┃ Used [%] ┃ Remain [bytes] ┃ Total [bytes] ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ Flash Code          │       276552 │          │                │               │
+│    .text            │       276552 │          │                │               │
+│ Flash Data          │       116680 │          │                │               │
+│    .rodata          │       116424 │          │                │               │
+│    .appdesc         │          256 │          │                │               │
+│ IRAM                │        66851 │     51.0 │          64221 │        131072 │
+│    .text            │        65823 │    50.22 │                │               │
+│    .vectors         │         1028 │     0.78 │                │               │
+│ DRAM                │        27335 │    21.94 │          97245 │        124580 │
+│    .data            │        17231 │    13.83 │                │               │
+│    .bss             │        10104 │     8.11 │                │               │
+└─────────────────────┴──────────────┴──────────┴────────────────┴───────────────┘
+Retrieving maximum program size .pio/build/esp32dev/firmware.elf
+Checking size .pio/build/esp32dev/firmware.elf
+Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
+RAM:   [=         ]   8.3% (used 27336 bytes from 327680 bytes)
+Flash: [====      ]  36.4% (used 477058 bytes from 1310720 bytes)
+Building .pio/build/esp32dev/firmware.bin
+esptool v5.1.2
+Creating ESP32 image...
+Merged 2 ELF sections.
+Successfully created ESP32 image.
+========================= [SUCCESS] Took 25.85 seconds =========================

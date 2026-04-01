@@ -5,10 +5,12 @@
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include <sys/time.h>
 #include <time.h>
 #include <unity.h>
 
 #include "esp_scheduler/executors/scheduler_executor.h"
+#include "esp_scheduler/service/scheduler_service.h"
 #include "esp_scheduler/service/scheduler_events.h"
 
 ESPDate date;
@@ -25,6 +27,14 @@ ESPScheduler scheduler(date, manualConfig());
 static int inlineHits = 0;
 static int asyncHits = 0;
 static int slowHits = 0;
+static const char *kUtcTz = "UTC0";
+
+static void setSystemTimeUtc(const DateTime &dt) {
+	timeval tv{};
+	tv.tv_sec = static_cast<time_t>(dt.epochSeconds);
+	tv.tv_usec = 0;
+	settimeofday(&tv, nullptr);
+}
 
 static void inlineCallback(void *userData) {
 	(void)userData;
@@ -275,6 +285,109 @@ static void test_sunset_next_occurrence_with_offsets() {
 
 	TEST_ASSERT_TRUE(scheduler.computeNextOccurrence(Schedule::sunset(-20), from, next));
 	TEST_ASSERT_TRUE(date.isEqual(next, date.addMinutes(setToday.value, -20)));
+}
+
+static void test_refresh_all_schedules_updates_local_recurring_job() {
+	setSystemTimeUtc(date.fromUtc(2025, 1, 1, 8, 0, 0));
+
+	JobOptions options{};
+	SchedulerResult<uint32_t> added =
+	    scheduler.addJob(Schedule::dailyAtLocal(9, 30), options, &inlineCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	JobInfo info{};
+	TEST_ASSERT_TRUE(scheduler.getJobInfo(added.value, info).ok());
+	TEST_ASSERT_TRUE(info.hasNext);
+	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, date.fromUtc(2025, 1, 1, 9, 30, 0)));
+
+	setSystemTimeUtc(date.fromUtc(2025, 1, 1, 10, 0, 0));
+	TEST_ASSERT_TRUE(scheduler.refreshAllSchedules().ok());
+
+	TEST_ASSERT_TRUE(scheduler.getJobInfo(added.value, info).ok());
+	TEST_ASSERT_TRUE(info.hasNext);
+	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, date.fromUtc(2025, 1, 2, 9, 30, 0)));
+}
+
+static void test_refresh_all_schedules_updates_sunrise_schedule() {
+	setSystemTimeUtc(date.fromUtc(2025, 6, 1, 0, 0, 0));
+
+	JobOptions options{};
+	SchedulerResult<uint32_t> added =
+	    scheduler.addJob(Schedule::sunrise(), options, &inlineCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	JobInfo info{};
+	TEST_ASSERT_TRUE(scheduler.getJobInfo(added.value, info).ok());
+	SunCycleResult riseToday = date.sunrise(date.now());
+	TEST_ASSERT_TRUE(riseToday.ok);
+	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, riseToday.value));
+
+	setSystemTimeUtc(date.fromUtc(2025, 6, 1, 12, 0, 0));
+	TEST_ASSERT_TRUE(scheduler.refreshAllSchedules().ok());
+
+	TEST_ASSERT_TRUE(scheduler.getJobInfo(added.value, info).ok());
+	DateTime expected{};
+	TEST_ASSERT_TRUE(scheduler.computeNextOccurrence(Schedule::sunrise(), date.now(), expected));
+	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, expected));
+}
+
+static void test_refresh_all_schedules_leaves_one_shot_utc_unchanged() {
+	setSystemTimeUtc(date.fromUtc(2025, 1, 1, 8, 0, 0));
+
+	JobOptions options{};
+	DateTime whenUtc = date.fromUtc(2025, 1, 1, 12, 0, 0);
+	SchedulerResult<uint32_t> added =
+	    scheduler.addJobOnceUtc(whenUtc, options, &inlineCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	setSystemTimeUtc(date.fromUtc(2025, 1, 1, 10, 0, 0));
+	TEST_ASSERT_TRUE(scheduler.refreshAllSchedules().ok());
+
+	JobInfo info{};
+	TEST_ASSERT_TRUE(scheduler.getJobInfo(added.value, info).ok());
+	TEST_ASSERT_TRUE(info.hasNext);
+	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, whenUtc));
+}
+
+static void test_local_midnight_refreshes_before_due_dispatch() {
+	setSystemTimeUtc(date.fromUtc(2025, 1, 1, 0, 10, 0));
+
+	JobOptions options{};
+	SchedulerResult<uint32_t> added =
+	    scheduler.addJob(Schedule::dailyAtLocal(6, 0), options, &inlineCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	scheduler.tick(date.fromUtc(2025, 1, 1, 0, 10, 0));
+	TEST_ASSERT_EQUAL(0, inlineHits);
+
+	scheduler.tick(date.fromUtc(2025, 1, 2, 0, 1, 0));
+	TEST_ASSERT_EQUAL(0, inlineHits);
+
+	JobInfo info{};
+	TEST_ASSERT_TRUE(scheduler.getJobInfo(added.value, info).ok());
+	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, date.fromUtc(2025, 1, 2, 6, 0, 0)));
+}
+
+static void test_ntp_listener_refreshes_on_next_tick() {
+	setSystemTimeUtc(date.fromUtc(2025, 1, 1, 0, 10, 0));
+
+	JobOptions options{};
+	SchedulerResult<uint32_t> added =
+	    scheduler.addJob(Schedule::dailyAtLocal(6, 0), options, &inlineCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	scheduler.tick(date.fromUtc(2025, 1, 1, 0, 10, 0));
+	TEST_ASSERT_EQUAL(0, inlineHits);
+
+	DateTime syncedAtUtc = date.fromUtc(2025, 1, 2, 0, 1, 0);
+	setSystemTimeUtc(syncedAtUtc);
+	date._testDispatchNtpSync(syncedAtUtc);
+	scheduler.tick(syncedAtUtc);
+
+	TEST_ASSERT_EQUAL(0, inlineHits);
+	JobInfo info{};
+	TEST_ASSERT_TRUE(scheduler.getJobInfo(added.value, info).ok());
+	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, date.fromUtc(2025, 1, 2, 6, 0, 0)));
 }
 
 static void test_moon_phase_name_last_quarter_next_occurrence() {
@@ -530,6 +643,31 @@ static void test_background_command_roundtrip_stress() {
 	background.end(true);
 }
 
+static void test_background_refresh_all_schedules_roundtrip_updates_next_run() {
+	SchedulerConfig config{};
+	config.mode = SchedulerMode::Background;
+	ESPScheduler background(date, config);
+	TEST_ASSERT_TRUE(background.begin());
+	background.setMinValidUnixSeconds(0);
+
+	setSystemTimeUtc(date.fromUtc(2025, 1, 1, 8, 0, 0));
+	JobOptions options{};
+	SchedulerResult<uint32_t> added =
+	    background.addJob(Schedule::dailyAtLocal(9, 30), options, &inlineCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	JobInfo info{};
+	TEST_ASSERT_TRUE(background.getJobInfo(added.value, info).ok());
+	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, date.fromUtc(2025, 1, 1, 9, 30, 0)));
+
+	setSystemTimeUtc(date.fromUtc(2025, 1, 1, 10, 0, 0));
+	TEST_ASSERT_TRUE(background.refreshAllSchedules().ok());
+	TEST_ASSERT_TRUE(background.getJobInfo(added.value, info).ok());
+	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, date.fromUtc(2025, 1, 2, 9, 30, 0)));
+
+	background.end(true);
+}
+
 static void test_begin_fails_for_missing_builtin_espworker() {
 	SchedulerConfig config = manualConfig();
 	config.defaultAsyncBackend = AsyncExecutorBackend::ESPWorker;
@@ -612,10 +750,33 @@ static void test_begin_fails_for_invalid_service_stack_size() {
 	TEST_ASSERT_FALSE(local.begin());
 }
 
+static void test_next_wake_ticks_prefers_local_midnight_over_later_due_job() {
+	setenv("TZ", kUtcTz, 1);
+	tzset();
+	DateTime nowUtc = date.fromUtc(2025, 1, 1, 23, 59, 30);
+	const TickType_t waitTicks = scheduler_service_detail::nextWakeTicks(
+	    date,
+	    nowUtc,
+	    true,
+	    date.fromUtc(2025, 1, 2, 10, 0, 0).epochSeconds,
+	    pdMS_TO_TICKS(1000)
+	);
+	TEST_ASSERT_EQUAL(pdMS_TO_TICKS(30000), waitTicks);
+}
+
 void setUp() {
 	inlineHits = 0;
 	asyncHits = 0;
 	slowHits = 0;
+	setenv("TZ", kUtcTz, 1);
+	tzset();
+	date.deinit();
+	ESPDateConfig config{};
+	config.latitude = 47.4979f;
+	config.longitude = 19.0402f;
+	config.timeZone = kUtcTz;
+	date.init(config);
+	setSystemTimeUtc(date.fromUtc(2025, 1, 1, 0, 0, 0));
 	scheduler.begin();
 	scheduler.setMinValidUnixSeconds(ESPScheduler::kDefaultMinValidEpochSeconds);
 	scheduler.cancelAll();
@@ -623,16 +784,10 @@ void setUp() {
 
 void tearDown() {
 	scheduler.end(true);
+	date.deinit();
 }
 
 void setup() {
-	setenv("TZ", "UTC0", 1);
-	tzset();
-	ESPDateConfig config{};
-	config.latitude = 47.4979f;
-	config.longitude = 19.0402f;
-	config.timeZone = "UTC0";
-	date.init(config);
 	delay(2000);
 
 	UNITY_BEGIN();
@@ -649,6 +804,11 @@ void setup() {
 	RUN_TEST(test_executor_unavailable_is_reported);
 	RUN_TEST(test_sunrise_next_occurrence_with_offsets);
 	RUN_TEST(test_sunset_next_occurrence_with_offsets);
+	RUN_TEST(test_refresh_all_schedules_updates_local_recurring_job);
+	RUN_TEST(test_refresh_all_schedules_updates_sunrise_schedule);
+	RUN_TEST(test_refresh_all_schedules_leaves_one_shot_utc_unchanged);
+	RUN_TEST(test_local_midnight_refreshes_before_due_dispatch);
+	RUN_TEST(test_ntp_listener_refreshes_on_next_tick);
 	RUN_TEST(test_moon_phase_name_last_quarter_next_occurrence);
 	RUN_TEST(test_moon_illumination_crossing_and_reschedule);
 	RUN_TEST(test_invalid_astronomical_schedule_validation);
@@ -656,6 +816,7 @@ void setup() {
 	RUN_TEST(test_queue_one_behavior);
 	RUN_TEST(test_allow_parallel_behavior);
 	RUN_TEST(test_cancel_running_async_job_and_stale_completion_is_ignored);
+	RUN_TEST(test_background_refresh_all_schedules_roundtrip_updates_next_run);
 	RUN_TEST(test_background_multiple_add_job_commands_do_not_corrupt_command_lifetime);
 	RUN_TEST(test_background_command_roundtrip_stress);
 	RUN_TEST(test_background_async_runs_without_tick);
@@ -664,6 +825,7 @@ void setup() {
 	RUN_TEST(test_end_wait_true_drains_manual_async_invocation);
 	RUN_TEST(test_end_wait_false_returns_without_drain);
 	RUN_TEST(test_begin_fails_for_invalid_service_stack_size);
+	RUN_TEST(test_next_wake_ticks_prefers_local_midnight_over_later_due_job);
 	RUN_TEST(test_v1_compat_cleanup_prunes_canceled_jobs);
 	UNITY_END();
 }

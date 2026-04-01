@@ -151,6 +151,47 @@ struct ESPScheduler::Impl : public IExecutorResolver {
 		}
 	}
 
+	void resetTimeContextTracking() {
+		timeContextRefreshRequested.store(false);
+		lastObservedLocalDayStartUtc = DateTime{};
+		hasLastObservedLocalDayStartUtc = false;
+	}
+
+	void requestTimeContextRefresh() {
+		timeContextRefreshRequested.store(true);
+	}
+
+	bool refreshTimeContextIfNeeded(const DateTime &nowUtc) {
+		bool refreshRequested = timeContextRefreshRequested.exchange(false);
+		const DateTime currentLocalDayStartUtc = date.startOfDayLocal(nowUtc);
+		if (!hasLastObservedLocalDayStartUtc) {
+			lastObservedLocalDayStartUtc = currentLocalDayStartUtc;
+			hasLastObservedLocalDayStartUtc = true;
+		} else if (!date.isEqual(currentLocalDayStartUtc, lastObservedLocalDayStartUtc)) {
+			lastObservedLocalDayStartUtc = currentLocalDayStartUtc;
+			refreshRequested = true;
+		}
+		return refreshRequested;
+	}
+
+	bool registerTimeSyncListener() {
+		ntpSyncListenerId = date.addNtpSyncListener([this](const DateTime &) {
+			requestTimeContextRefresh();
+			if (config.mode == SchedulerMode::Background && service) {
+				(void)service->send(nullptr);
+			}
+		});
+		return ntpSyncListenerId != 0;
+	}
+
+	void unregisterTimeSyncListener() {
+		if (ntpSyncListenerId != 0) {
+			(void)date.removeNtpSyncListener(ntpSyncListenerId);
+			ntpSyncListenerId = 0;
+		}
+		resetTimeContextTracking();
+	}
+
 	ESPDate &date;
 	SchedulerConfig config{};
 	SchedulerCore manualCore;
@@ -163,6 +204,10 @@ struct ESPScheduler::Impl : public IExecutorResolver {
 	SchedulerArray<ISchedulerExecutor *> executors{};
 	std::shared_ptr<SchedulerExecutorRuntime> runtime{};
 	QueueHandle_t eventQueue = nullptr;
+	std::atomic<bool> timeContextRefreshRequested{false};
+	DateTime lastObservedLocalDayStartUtc{};
+	bool hasLastObservedLocalDayStartUtc = false;
+	ESPDate::NtpSyncListenerId ntpSyncListenerId = 0;
 	bool started = false;
 	bool draining = false;
 };
@@ -194,6 +239,7 @@ bool ESPScheduler::begin() {
 		    impl_->config.service,
 		    impl_->config.minValidEpochSeconds,
 		    impl_->config.usePSRAMMetadata,
+		    impl_->timeContextRefreshRequested,
 		    *impl_
 		));
 		if (!impl_->service || !impl_->service->begin()) {
@@ -219,6 +265,10 @@ bool ESPScheduler::begin() {
 		end(false);
 		return false;
 	}
+	if (!impl_->registerTimeSyncListener()) {
+		end(false);
+		return false;
+	}
 
 	impl_->draining = false;
 	return true;
@@ -230,6 +280,7 @@ void ESPScheduler::end(bool waitForRunningJobs, uint32_t timeoutMs) {
 	}
 
 	impl_->draining = true;
+	impl_->unregisterTimeSyncListener();
 
 	if (impl_->config.mode == SchedulerMode::Background && impl_->service) {
 		executeBackgroundCommand<CancelAllCommand, SchedulerResult<void>>(
@@ -480,6 +531,25 @@ SchedulerResult<void> ESPScheduler::cancelAll() {
 	return impl_->manualCore.cancelAll();
 }
 
+SchedulerResult<void> ESPScheduler::refreshAllSchedules() {
+	if (!impl_ || !impl_->started || impl_->draining) {
+		return SchedulerResult<void>::failure(SchedulerError::NotInitialized);
+	}
+	if (impl_->config.mode == SchedulerMode::Background && impl_->service) {
+		return executeBackgroundCommand<RefreshAllSchedulesCommand, SchedulerResult<void>>(
+		    *impl_->service,
+		    impl_->config.service.controlTimeoutMs,
+		    SchedulerError::QueueFull,
+		    SchedulerError::Timeout,
+		    [](RefreshAllSchedulesCommand &) {}
+		);
+	}
+
+	const DateTime nowUtc = impl_->date.now();
+	impl_->drainManualEvents(nowUtc);
+	return impl_->manualCore.refreshAllSchedules(nowUtc);
+}
+
 void ESPScheduler::tick() {
 	if (!impl_) {
 		return;
@@ -492,6 +562,9 @@ void ESPScheduler::tick(const DateTime &nowUtc) {
 		return;
 	}
 	impl_->drainManualEvents(nowUtc);
+	if (impl_->refreshTimeContextIfNeeded(nowUtc)) {
+		(void)impl_->manualCore.refreshAllSchedules(nowUtc);
+	}
 	impl_->manualCore.dispatchDue(nowUtc, *impl_);
 	impl_->drainManualEvents(nowUtc);
 }

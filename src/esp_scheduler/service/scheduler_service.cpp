@@ -8,16 +8,49 @@ namespace {
 constexpr uint32_t kIdlePollMs = 1000;
 }
 
+TickType_t scheduler_service_detail::nextWakeTicks(
+    ESPDate &date,
+    const DateTime &nowUtc,
+    bool hasNextDue,
+    int64_t nextDueEpochSeconds,
+    TickType_t idlePollTicks
+) {
+	int64_t nextWakeEpoch = 0;
+	bool hasWake = false;
+
+	if (hasNextDue) {
+		nextWakeEpoch = nextDueEpochSeconds;
+		hasWake = true;
+	}
+
+	const DateTime nextLocalMidnightUtc = date.startOfDayLocal(date.addDays(nowUtc, 1));
+	if (!hasWake || nextLocalMidnightUtc.epochSeconds < nextWakeEpoch) {
+		nextWakeEpoch = nextLocalMidnightUtc.epochSeconds;
+		hasWake = true;
+	}
+
+	if (!hasWake) {
+		return idlePollTicks;
+	}
+	if (nextWakeEpoch <= nowUtc.epochSeconds) {
+		return 0;
+	}
+	const int64_t waitSeconds = nextWakeEpoch - nowUtc.epochSeconds;
+	return pdMS_TO_TICKS(static_cast<uint32_t>(waitSeconds * 1000));
+}
+
 SchedulerService::SchedulerService(
     ESPDate &date,
     const SchedulerServiceConfig &config,
     int64_t minValidEpochSeconds,
     bool usePSRAMMetadata,
+    std::atomic<bool> &timeContextRefreshRequested,
     IExecutorResolver &executors
 )
     : date_(date),
       config_(config),
       core_(date, minValidEpochSeconds, usePSRAMMetadata),
+      timeContextRefreshRequested_(timeContextRefreshRequested),
       executors_(executors) {
 }
 
@@ -181,24 +214,43 @@ void SchedulerService::drainEvents() {
 	}
 }
 
+void SchedulerService::refreshTimeContextIfNeeded(const DateTime &nowUtc) {
+	bool refreshRequested = timeContextRefreshRequested_.exchange(false);
+	const DateTime currentLocalDayStartUtc = date_.startOfDayLocal(nowUtc);
+	if (!hasLastObservedLocalDayStartUtc_) {
+		lastObservedLocalDayStartUtc_ = currentLocalDayStartUtc;
+		hasLastObservedLocalDayStartUtc_ = true;
+	} else if (!date_.isEqual(currentLocalDayStartUtc, lastObservedLocalDayStartUtc_)) {
+		lastObservedLocalDayStartUtc_ = currentLocalDayStartUtc;
+		refreshRequested = true;
+	}
+
+	if (refreshRequested) {
+		(void)core_.refreshAllSchedules(nowUtc);
+	}
+}
+
 void SchedulerService::run() {
 	while (!stopRequested_.load()) {
 		drainCommands();
 		drainEvents();
 
 		const DateTime nowUtc = date_.now();
+		refreshTimeContextIfNeeded(nowUtc);
 		core_.dispatchDue(nowUtc, executors_);
 		activeInvocationCount_.store(core_.activeInvocationCount());
 
 		int64_t nextEpochSeconds = 0;
 		TickType_t waitTicks = pdMS_TO_TICKS(kIdlePollMs);
-		if (core_.clockValid(nowUtc) && core_.nextDueEpoch(nextEpochSeconds)) {
-			if (nextEpochSeconds <= nowUtc.epochSeconds) {
-				waitTicks = 0;
-			} else {
-				const int64_t waitSeconds = nextEpochSeconds - nowUtc.epochSeconds;
-				waitTicks = pdMS_TO_TICKS(static_cast<uint32_t>(waitSeconds * 1000));
-			}
+		if (core_.clockValid(nowUtc)) {
+			const bool hasNextDue = core_.nextDueEpoch(nextEpochSeconds);
+			waitTicks = scheduler_service_detail::nextWakeTicks(
+			    date_,
+			    nowUtc,
+			    hasNextDue,
+			    nextEpochSeconds,
+			    waitTicks
+			);
 		}
 
 		QueueSetMemberHandle_t ready =

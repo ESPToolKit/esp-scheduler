@@ -71,6 +71,13 @@ class CancelAllCommand : public SchedulerServiceCommand {
 	void execute(SchedulerCore &core, ESPDate &date, IExecutorResolver &executors) override;
 };
 
+class RefreshAllSchedulesCommand : public SchedulerServiceCommand {
+  public:
+	SchedulerResult<void> result = SchedulerResult<void>::failure(SchedulerError::NotInitialized);
+
+	void execute(SchedulerCore &core, ESPDate &date, IExecutorResolver &executors) override;
+};
+
 class JobCountCommand : public SchedulerServiceCommand {
   public:
 	SchedulerResult<size_t> result = SchedulerResult<size_t>::failure(

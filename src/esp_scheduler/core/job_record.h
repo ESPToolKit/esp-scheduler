@@ -21,6 +21,7 @@ struct JobRecord {
 	bool queuedWhileRunning = false;
 	bool hasNext = false;
 	bool pendingSchedule = false;
+	bool refreshPending = false;
 	uint16_t runningCount = 0;
 
 	DateTime nextRunUtc{};

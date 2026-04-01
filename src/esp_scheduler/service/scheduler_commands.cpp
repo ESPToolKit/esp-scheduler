@@ -60,6 +60,13 @@ void CancelAllCommand::execute(SchedulerCore &core, ESPDate &date, IExecutorReso
 	result = core.cancelAll();
 }
 
+void RefreshAllSchedulesCommand::execute(
+    SchedulerCore &core, ESPDate &date, IExecutorResolver &executors
+) {
+	(void)executors;
+	result = core.refreshAllSchedules(date.now());
+}
+
 void JobCountCommand::execute(SchedulerCore &core, ESPDate &date, IExecutorResolver &executors) {
 	(void)date;
 	(void)executors;

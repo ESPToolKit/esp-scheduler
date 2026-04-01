@@ -24,6 +24,7 @@ ESPScheduler v2 is a C++17 scheduler for ESP32 firmware that keeps the cron-styl
 - Optional built-in `ESPWorker` async backend via config when you want scheduler-managed integration without manual executor registration.
 - Deterministic lifecycle with `begin()` / `end()`.
 - Clock validity guard via `setMinValidUnixSeconds()` / `setMinValidUtc()`.
+- `refreshAllSchedules()` to recompute recurring jobs after wall-clock changes.
 - `usePSRAMMetadata` routes scheduler-owned job metadata, slot storage, and due-heap buffers through the scheduler allocator.
 - `usePsramStack` is honored for the scheduler service task, worker-pool workers, and dedicated-task jobs when the target supports external task stacks.
 - Arduino / ESP-IDF friendly metadata handling, branch-push CI builds, and device tests.
@@ -117,7 +118,7 @@ void loop() {
 - `bool begin()` / `void end(bool waitForRunningJobs = true, uint32_t timeoutMs = 5000)`
 - `SchedulerResult<uint32_t> addJob(...)`
 - `SchedulerResult<uint32_t> addJobOnceUtc(...)`
-- `SchedulerResult<void> cancelJob(...)`, `pauseJob(...)`, `resumeJob(...)`, `cancelAll()`
+- `SchedulerResult<void> cancelJob(...)`, `pauseJob(...)`, `resumeJob(...)`, `cancelAll()`, `refreshAllSchedules()`
 - `void tick()` / `tick(nowUtc)` for manual mode
 - `SchedulerResult<size_t> jobCount() const`
 - `SchedulerResult<void> getJobInfo(jobId, out) const`
@@ -186,6 +187,8 @@ options.dedicatedTask = &task;
 ## Time Semantics
 - Recurring schedules are evaluated in local time.
 - One-shot UTC schedules stay exact.
+- `refreshAllSchedules()` only affects recurring jobs; one-shot UTC jobs keep their original timestamp.
+- Recurring jobs auto-refresh on NTP sync and after local midnight. In manual mode that refresh happens on the next `tick()`. In background mode the scheduler wakes immediately on sync and also caps sleep to the next local midnight.
 - `dayOfMonth` and `dayOfWeek` follow classic cron OR semantics.
 - Moon helpers trigger on crossings with tolerance windows.
 - The scheduler idles until `now >= minValidUnixSeconds`.

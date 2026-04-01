@@ -24,6 +24,7 @@ class SchedulerCore {
 	SchedulerResult<void> pauseJob(uint32_t jobId);
 	SchedulerResult<void> resumeJob(uint32_t jobId, const DateTime &nowUtc);
 	SchedulerResult<void> cancelAll();
+	SchedulerResult<void> refreshAllSchedules(const DateTime &nowUtc);
 	SchedulerResult<size_t> jobCount() const;
 	SchedulerResult<void> getJobInfo(uint32_t jobId, JobInfo &out) const;
 

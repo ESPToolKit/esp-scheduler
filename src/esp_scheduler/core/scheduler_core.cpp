@@ -48,6 +48,7 @@ bool SchedulerCore::computeNextForJob(JobRecord &record, const DateTime &fromUtc
 		record.hasNext = false;
 		return false;
 	}
+	record.refreshPending = false;
 	if (record.schedule.isOneShot || record.schedule.kind == ScheduleKind::OneShotUtc) {
 		record.nextRunUtc = record.schedule.onceAtUtc;
 		record.hasNext = true;
@@ -73,6 +74,7 @@ bool SchedulerCore::queueScheduling(size_t slotIndex, const DateTime &fromUtc) {
 	if (!record.occupied || record.canceled || record.paused) {
 		record.pendingSchedule = false;
 		record.hasNext = false;
+		record.refreshPending = false;
 		return true;
 	}
 	record.scheduleFromUtc = fromUtc;
@@ -95,6 +97,7 @@ void SchedulerCore::clearScheduling(size_t slotIndex) {
 	JobRecord &record = jobs_[slotIndex];
 	record.pendingSchedule = false;
 	record.hasNext = false;
+	record.refreshPending = false;
 }
 
 void SchedulerCore::drainPendingSchedules(const DateTime &nowUtc) {
@@ -149,6 +152,7 @@ void SchedulerCore::retireJob(size_t slotIndex) {
 	record.queuedWhileRunning = false;
 	record.hasNext = false;
 	record.pendingSchedule = false;
+	record.refreshPending = false;
 	record.runningCount = 0;
 	record.callback = makeEmptyCallback();
 	record.name.clear();
@@ -284,6 +288,35 @@ SchedulerResult<void> SchedulerCore::cancelAll() {
 		record.queuedWhileRunning = false;
 		clearScheduling(index);
 		finalizeCanceledIfIdle(index);
+	}
+	return SchedulerResult<void>::success();
+}
+
+SchedulerResult<void> SchedulerCore::refreshAllSchedules(const DateTime &nowUtc) {
+	for (size_t index = 0; index < jobs_.size(); ++index) {
+		JobRecord &record = jobs_[index];
+		if (!record.occupied || record.canceled || record.paused) {
+			continue;
+		}
+		if (record.schedule.isOneShot || record.schedule.kind == ScheduleKind::OneShotUtc) {
+			continue;
+		}
+
+		record.pendingSchedule = false;
+		if (record.runningCount > 0 && record.overlap != OverlapPolicy::AllowParallel) {
+			record.refreshPending = true;
+			record.queuedWhileRunning = false;
+			record.hasNext = false;
+			record.nextRunUtc = DateTime{};
+			continue;
+		}
+
+		record.refreshPending = false;
+		record.hasNext = false;
+		record.nextRunUtc = DateTime{};
+		if (computeNextForJob(record, nowUtc) && !pushDue(index, record)) {
+			record.hasNext = false;
+		}
 	}
 	return SchedulerResult<void>::success();
 }
@@ -455,6 +488,14 @@ void SchedulerCore::handleCompletion(
 
 	if (record.canceled) {
 		finalizeCanceledIfIdle(slotIndex);
+		return;
+	}
+
+	if (record.refreshPending && record.runningCount == 0) {
+		record.refreshPending = false;
+		record.queuedWhileRunning = false;
+		record.hasNext = false;
+		(void)queueScheduling(slotIndex, nowUtc);
 		return;
 	}
 

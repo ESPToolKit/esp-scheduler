@@ -9,11 +9,13 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 - Compile-only `examples/v2_api_compile` sketch to exercise the native v2 API surface in CI.
 - Lifecycle and overlap coverage in the Unity test sketch for skip, queue-one, allow-parallel, background no-`tick()`, explicit shutdown, and v1 compatibility cleanup behavior.
 - Optional built-in `ESPWorker` async backend selection through `SchedulerConfig`.
+- `refreshAllSchedules()` to recompute recurring jobs after wall-clock changes without touching one-shot UTC jobs.
 
 ### Changed
 - CI now runs on every branch push and is split into PlatformIO v2 API builds, PlatformIO example builds, PlatformIO device test sketch builds, Arduino CLI v2 API builds, and Arduino CLI example builds.
 - Background command submission now treats a full control queue as `QueueFull` immediately instead of waiting for the control timeout window.
 - `SchedulerCore` now uses a scheduler-owned job id index, explicit pending-schedule bookkeeping, direct-indexed completion events, and heap-top validation instead of recovering hot-path state through whole-container scans.
+- Recurring schedules now auto-refresh on NTP sync and after local midnight; manual mode applies that refresh on the next `tick()`, while background mode wakes immediately on sync and also wakes at the next local midnight boundary.
 
 ### Fixed
 - Scheduler reschedule paths now clear `hasNext` if a due-heap insertion fails, so jobs are retried on the next dispatch pass instead of getting stuck in a primed-but-undispatchable state.
@@ -21,6 +23,7 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 - Background next-deadline lookup now purges stale heap entries lazily and returns the actual earliest valid due job without scanning the heap.
 - Completion events now validate slot index, job id, and generation directly, which keeps stale completions from touching reused slots.
 - Background command completion now snapshots abandoned ownership before signaling producers, which prevents a use-after-free race during background control command handoff.
+- Recurring jobs that were queued before an NTP or DST change now recompute their next occurrence instead of dispatching against stale `nextRunUtc` timestamps.
 
 ## [2.0.0] - 2026-03-27
 ### Added

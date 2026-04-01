@@ -7,6 +7,16 @@
 #include "../executors/scheduler_executor.h"
 #include "scheduler_commands.h"
 
+namespace scheduler_service_detail {
+TickType_t nextWakeTicks(
+    ESPDate &date,
+    const DateTime &nowUtc,
+    bool hasNextDue,
+    int64_t nextDueEpochSeconds,
+    TickType_t idlePollTicks
+);
+}
+
 class SchedulerService {
   public:
 	SchedulerService(
@@ -14,6 +24,7 @@ class SchedulerService {
 	    const SchedulerServiceConfig &config,
 	    int64_t minValidEpochSeconds,
 	    bool usePSRAMMetadata,
+	    std::atomic<bool> &timeContextRefreshRequested,
 	    IExecutorResolver &executors
 	);
 	~SchedulerService();
@@ -37,11 +48,15 @@ class SchedulerService {
 	void run();
 	void drainCommands();
 	void drainEvents();
+	void refreshTimeContextIfNeeded(const DateTime &nowUtc);
 
 	ESPDate &date_;
 	SchedulerServiceConfig config_{};
 	SchedulerCore core_;
+	std::atomic<bool> &timeContextRefreshRequested_;
 	IExecutorResolver &executors_;
+	DateTime lastObservedLocalDayStartUtc_{};
+	bool hasLastObservedLocalDayStartUtc_ = false;
 
 	QueueHandle_t commandQueue_ = nullptr;
 	QueueHandle_t eventQueue_ = nullptr;
