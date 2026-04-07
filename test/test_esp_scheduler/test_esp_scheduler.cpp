@@ -185,14 +185,29 @@ static void test_get_job_info_reports_next_run_by_job_id() {
 	    scheduler.addJob(Schedule::dailyAtLocal(6, 0), options, &inlineCallback, nullptr);
 	TEST_ASSERT_TRUE(added.ok());
 
-	scheduler.tick(date.fromUtc(2025, 1, 1, 0, 0, 0));
-
 	JobInfo info{};
 	TEST_ASSERT_TRUE(scheduler.getJobInfo(added.value, info).ok());
 	TEST_ASSERT_EQUAL(added.value, info.id);
 	TEST_ASSERT_FALSE(info.paused);
 	TEST_ASSERT_TRUE(info.hasNext);
 	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, date.fromUtc(2025, 1, 1, 6, 0, 0)));
+}
+
+static void test_astronomical_job_primes_next_run_immediately() {
+	setSystemTimeUtc(date.fromUtc(2025, 6, 1, 0, 0, 0));
+
+	JobOptions options{};
+	SchedulerResult<uint32_t> added =
+	    scheduler.addJob(Schedule::sunrise(), options, &inlineCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	JobInfo info{};
+	TEST_ASSERT_TRUE(scheduler.getJobInfo(added.value, info).ok());
+	TEST_ASSERT_TRUE(info.hasNext);
+
+	SunCycleResult riseToday = date.sunrise(date.now());
+	TEST_ASSERT_TRUE(riseToday.ok);
+	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, riseToday.value));
 }
 
 static void test_tick_waits_until_clock_valid_and_primes_once() {
@@ -209,6 +224,33 @@ static void test_tick_waits_until_clock_valid_and_primes_once() {
 
 	scheduler.tick(date.fromUtc(2025, 1, 1, 6, 1, 0));
 	TEST_ASSERT_EQUAL(1, inlineHits);
+}
+
+static void test_recurring_job_waits_until_clock_valid_before_priming() {
+	ESPScheduler local(date, manualConfig());
+	TEST_ASSERT_TRUE(local.begin());
+
+	setSystemTimeUtc(date.fromUtc(1970, 1, 1, 0, 0, 0));
+	JobOptions options{};
+	SchedulerResult<uint32_t> added =
+	    local.addJob(Schedule::dailyAtLocal(6, 0), options, &inlineCallback, nullptr);
+	TEST_ASSERT_TRUE(added.ok());
+
+	JobInfo info{};
+	TEST_ASSERT_TRUE(local.getJobInfo(added.value, info).ok());
+	TEST_ASSERT_FALSE(info.hasNext);
+
+	local.tick(date.fromUtc(1970, 1, 1, 0, 0, 0));
+	TEST_ASSERT_TRUE(local.getJobInfo(added.value, info).ok());
+	TEST_ASSERT_FALSE(info.hasNext);
+
+	setSystemTimeUtc(date.fromUtc(2025, 1, 1, 0, 0, 0));
+	local.tick(date.fromUtc(2025, 1, 1, 0, 0, 0));
+
+	TEST_ASSERT_TRUE(local.getJobInfo(added.value, info).ok());
+	TEST_ASSERT_TRUE(info.hasNext);
+	TEST_ASSERT_TRUE(date.isEqual(info.nextRunUtc, date.fromUtc(2025, 1, 1, 6, 0, 0)));
+	local.end(true);
 }
 
 static void test_pause_resume_cancel_and_job_count() {
@@ -798,7 +840,9 @@ void setup() {
 	RUN_TEST(test_dom_dow_or_logic_matches_either);
 	RUN_TEST(test_inline_tick_runs_and_reschedules);
 	RUN_TEST(test_get_job_info_reports_next_run_by_job_id);
+	RUN_TEST(test_astronomical_job_primes_next_run_immediately);
 	RUN_TEST(test_tick_waits_until_clock_valid_and_primes_once);
+	RUN_TEST(test_recurring_job_waits_until_clock_valid_before_priming);
 	RUN_TEST(test_pause_resume_cancel_and_job_count);
 	RUN_TEST(test_slot_reuse_keeps_old_job_id_invalid);
 	RUN_TEST(test_executor_unavailable_is_reported);

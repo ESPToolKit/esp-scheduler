@@ -200,7 +200,8 @@ SchedulerResult<uint32_t> SchedulerCore::addJob(
 	if (options.dedicatedTask) {
 		record.dedicatedTask = *options.dedicatedTask;
 	}
-	if (clockValid(nowUtc) && !record.paused) {
+	const bool shouldPrimeImmediately = !record.paused && clockValid(nowUtc);
+	if (shouldPrimeImmediately) {
 		computeNextForJob(record, nowUtc);
 	}
 
@@ -221,8 +222,7 @@ SchedulerResult<uint32_t> SchedulerCore::addJob(
 		}
 	}
 
-	if (!jobIndex_.set(jobs_[slotIndex].id, slotIndex) ||
-	    (!jobs_[slotIndex].paused && !queueScheduling(slotIndex, nowUtc))) {
+	if (!jobIndex_.set(jobs_[slotIndex].id, slotIndex)) {
 		jobIndex_.remove(jobs_[slotIndex].id);
 		if (reusedSlot) {
 			JobRecord empty(usePSRAMMetadata_);
@@ -233,6 +233,25 @@ SchedulerResult<uint32_t> SchedulerCore::addJob(
 			jobs_.popBack();
 		}
 		return SchedulerResult<uint32_t>::failure(SchedulerError::NoMemory);
+	}
+
+	if (!jobs_[slotIndex].paused) {
+		if (shouldPrimeImmediately) {
+			if (jobs_[slotIndex].hasNext && !pushDue(slotIndex, jobs_[slotIndex])) {
+				jobs_[slotIndex].hasNext = false;
+			}
+		} else if (!queueScheduling(slotIndex, nowUtc)) {
+			jobIndex_.remove(jobs_[slotIndex].id);
+			if (reusedSlot) {
+				JobRecord empty(usePSRAMMetadata_);
+				empty.generation = reusedGeneration;
+				jobs_[slotIndex] = std::move(empty);
+				freeSlots_.pushBack(slotIndex);
+			} else {
+				jobs_.popBack();
+			}
+			return SchedulerResult<uint32_t>::failure(SchedulerError::NoMemory);
+		}
 	}
 	return SchedulerResult<uint32_t>::success(jobs_[slotIndex].id);
 }
