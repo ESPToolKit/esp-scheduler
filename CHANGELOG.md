@@ -24,6 +24,7 @@ The format follows Keep a Changelog and the project adheres to Semantic Versioni
 - Completion events now validate slot index, job id, and generation directly, which keeps stale completions from touching reused slots.
 - Background command completion now snapshots abandoned ownership before signaling producers, which prevents a use-after-free race during background control command handoff.
 - Recurring jobs that were queued before an NTP or DST change now recompute their next occurrence instead of dispatching against stale `nextRunUtc` timestamps.
+- CI now pins PIOArduino Core to `v6.1.19` and installs the ESP32 platform via `pio pkg install`, restoring PlatformIO compatibility with the current `platform-espressif32` package.
 
 ## [2.0.0] - 2026-03-27
 ### Added
