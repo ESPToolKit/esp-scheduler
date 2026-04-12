@@ -3,9 +3,9 @@
 #include <cstddef>
 
 extern "C" {
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_heap_caps.h"
 }
 
 #if __has_include("freertos/idf_additions.h")

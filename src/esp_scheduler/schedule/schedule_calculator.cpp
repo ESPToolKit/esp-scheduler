@@ -201,18 +201,17 @@ bool computeNextMoonPhaseOccurrence(
 
 		const double currentUnwrapped =
 		    unwrapAngle(previousUnwrapped, static_cast<double>(currentPhase.angleDegrees));
-		const bool crossed =
-		    !valueWithinPeriodicWindow(
-		        previousUnwrapped,
-		        static_cast<double>(spec.moonPhaseAngleDegrees),
-		        static_cast<double>(spec.moonPhaseToleranceDegrees)
-		    ) &&
-		    segmentIntersectsPeriodicWindow(
-		        previousUnwrapped,
-		        currentUnwrapped,
-		        static_cast<double>(spec.moonPhaseAngleDegrees),
-		        static_cast<double>(spec.moonPhaseToleranceDegrees)
-		    );
+		const bool crossed = !valueWithinPeriodicWindow(
+		                         previousUnwrapped,
+		                         static_cast<double>(spec.moonPhaseAngleDegrees),
+		                         static_cast<double>(spec.moonPhaseToleranceDegrees)
+		                     ) &&
+		                     segmentIntersectsPeriodicWindow(
+		                         previousUnwrapped,
+		                         currentUnwrapped,
+		                         static_cast<double>(spec.moonPhaseAngleDegrees),
+		                         static_cast<double>(spec.moonPhaseToleranceDegrees)
+		                     );
 		if (crossed) {
 			outNextUtc = current;
 			return true;
@@ -250,8 +249,12 @@ bool computeNextMoonIlluminationOccurrence(
 		    spec.moonIlluminationTargetPercent + spec.moonIlluminationTolerancePercent;
 		const bool wasInside = previousIllumination >= minWindow - kComparisonEpsilon &&
 		                       previousIllumination <= maxWindow + kComparisonEpsilon;
-		if (!wasInside &&
-		    segmentIntersectsRange(previousIllumination, currentIllumination, minWindow, maxWindow)) {
+		if (!wasInside && segmentIntersectsRange(
+		                      previousIllumination,
+		                      currentIllumination,
+		                      minWindow,
+		                      maxWindow
+		                  )) {
 			outNextUtc = current;
 			return true;
 		}
@@ -269,8 +272,8 @@ bool ScheduleCalculator::validate(const ScheduleSpec &spec) {
 		return true;
 	case ScheduleKind::Cron:
 		return fieldWithinRange(spec.minute, 0, 59) && fieldWithinRange(spec.hour, 0, 23) &&
-		       fieldWithinRange(spec.dayOfMonth, 1, 31) &&
-		       fieldWithinRange(spec.month, 1, 12) && fieldWithinRange(spec.dayOfWeek, 0, 6);
+		       fieldWithinRange(spec.dayOfMonth, 1, 31) && fieldWithinRange(spec.month, 1, 12) &&
+		       fieldWithinRange(spec.dayOfWeek, 0, 6);
 	case ScheduleKind::Sunrise:
 	case ScheduleKind::Sunset:
 		return spec.sunOffsetMinutes >= kMinSunOffsetMinutes &&

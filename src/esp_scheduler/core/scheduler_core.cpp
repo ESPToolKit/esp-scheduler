@@ -9,14 +9,9 @@ CallbackRef makeEmptyCallback() {
 } // namespace
 
 SchedulerCore::SchedulerCore(ESPDate &date, int64_t minValidEpochSeconds, bool usePSRAMMetadata)
-    : date_(date),
-      minValidEpochSeconds_(minValidEpochSeconds),
-      usePSRAMMetadata_(usePSRAMMetadata),
-      jobs_(usePSRAMMetadata),
-      freeSlots_(usePSRAMMetadata),
-      pendingSchedules_(usePSRAMMetadata),
-      jobIndex_(usePSRAMMetadata),
-      dueHeap_(usePSRAMMetadata) {
+    : date_(date), minValidEpochSeconds_(minValidEpochSeconds), usePSRAMMetadata_(usePSRAMMetadata),
+      jobs_(usePSRAMMetadata), freeSlots_(usePSRAMMetadata), pendingSchedules_(usePSRAMMetadata),
+      jobIndex_(usePSRAMMetadata), dueHeap_(usePSRAMMetadata) {
 }
 
 void SchedulerCore::setMinValidUnixSeconds(int64_t minEpochSeconds) {
@@ -416,7 +411,7 @@ void SchedulerCore::dispatchOne(
 			record.hasNext = false;
 		}
 		if (!executor->submit(invocation)) {
-		record.runningCount--;
+			record.runningCount--;
 			record.hasNext = true;
 			record.nextRunUtc = date_.addSeconds(nowUtc, kRetryDelaySeconds);
 			if (!pushDue(slotIndex, record)) {

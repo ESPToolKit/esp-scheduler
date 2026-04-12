@@ -70,7 +70,9 @@ template <typename T> void schedulerDeallocate(T *ptr) noexcept {
 }
 
 template <typename T>
-T *schedulerReallocate(T *ptr, std::size_t oldCount, std::size_t newCount, bool usePSRAMBuffers) noexcept {
+T *schedulerReallocate(
+    T *ptr, std::size_t oldCount, std::size_t newCount, bool usePSRAMBuffers
+) noexcept {
 	(void)oldCount;
 	if (newCount == 0) {
 		scheduler_allocator_detail::deallocate(ptr);
@@ -118,20 +120,12 @@ template <typename T> class SchedulerAllocator {
 			return nullptr;
 		}
 		if (n > (std::numeric_limits<std::size_t>::max() / sizeof(T))) {
-#if defined(__cpp_exceptions)
-			throw std::bad_alloc();
-#else
-			std::abort();
-#endif
+			return nullptr;
 		}
 
 		void *memory = scheduler_allocator_detail::allocate(n * sizeof(T), usePSRAMBuffers_);
 		if (!memory) {
-#if defined(__cpp_exceptions)
-			throw std::bad_alloc();
-#else
-			std::abort();
-#endif
+			return nullptr;
 		}
 		return static_cast<T *>(memory);
 	}

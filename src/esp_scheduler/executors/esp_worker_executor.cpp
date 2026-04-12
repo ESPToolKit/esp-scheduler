@@ -45,12 +45,7 @@ bool ESPWorkerExecutorAdapter::submit(const JobInvocation &invocation) {
 	WorkerResult result = worker_.spawn(
 	    [invocation, runtime]() {
 		    invocation.callback.invoke();
-		    postCompletion(
-		        runtime,
-		        invocation.jobId,
-		        invocation.generation,
-		        invocation.slotIndex
-		    );
+		    postCompletion(runtime, invocation.jobId, invocation.generation, invocation.slotIndex);
 	    },
 	    config
 	);

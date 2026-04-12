@@ -20,12 +20,7 @@ void setup() {
 
 	JobOptions options{};
 	options.dispatch = DispatchPolicy::Async;
-	scheduler.addJob(
-	    Schedule::weeklyAtLocal(0b0111110, 18, 30),
-	    options,
-	    &backgroundJob,
-	    nullptr
-	);
+	scheduler.addJob(Schedule::weeklyAtLocal(0b0111110, 18, 30), options, &backgroundJob, nullptr);
 }
 
 void loop() {

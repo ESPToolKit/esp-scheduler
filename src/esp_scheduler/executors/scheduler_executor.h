@@ -31,13 +31,20 @@ struct CallbackRef {
 	}
 
 	void invoke() const {
-		if (owningFn) {
-			(*owningFn)(userData);
-			return;
+#if defined(__cpp_exceptions)
+		try {
+#endif
+			if (owningFn) {
+				(*owningFn)(userData);
+				return;
+			}
+			if (rawFn) {
+				rawFn(userData);
+			}
+#if defined(__cpp_exceptions)
+		} catch (...) {
 		}
-		if (rawFn) {
-			rawFn(userData);
-		}
+#endif
 	}
 };
 

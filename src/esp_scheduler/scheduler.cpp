@@ -3,8 +3,8 @@
 #include <new>
 #include <utility>
 
-#include "core/scheduler_core.h"
 #include "core/runtime_containers.h"
+#include "core/scheduler_core.h"
 #include "executors/dedicated_task_executor.h"
 #include "executors/esp_worker_executor.h"
 #include "executors/inline_executor.h"
@@ -46,11 +46,9 @@ TResult executeBackgroundCommand(
 
 struct ESPScheduler::Impl : public IExecutorResolver {
 	explicit Impl(ESPDate &date, const SchedulerConfig &config)
-	    : date(date),
-	      config(config),
+	    : date(date), config(config),
 	      manualCore(date, config.minValidEpochSeconds, config.usePSRAMMetadata),
-	      externalExecutors(config.usePSRAMMetadata),
-	      executors(config.usePSRAMMetadata) {
+	      externalExecutors(config.usePSRAMMetadata), executors(config.usePSRAMMetadata) {
 	}
 
 	~Impl() {
@@ -249,10 +247,8 @@ bool ESPScheduler::begin() {
 		}
 		impl_->runtime->eventQueue = impl_->service->eventQueue();
 	} else {
-		impl_->eventQueue = xQueueCreate(
-		    impl_->config.service.eventQueueDepth,
-		    sizeof(SchedulerEvent)
-		);
+		impl_->eventQueue =
+		    xQueueCreate(impl_->config.service.eventQueueDepth, sizeof(SchedulerEvent));
 		if (!impl_->eventQueue) {
 			impl_->runtime.reset();
 			return false;
@@ -293,8 +289,7 @@ void ESPScheduler::end(bool waitForRunningJobs, uint32_t timeoutMs) {
 
 		if (waitForRunningJobs) {
 			const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeoutMs);
-			while (impl_->service->activeInvocationCount() > 0 &&
-			       xTaskGetTickCount() < deadline) {
+			while (impl_->service->activeInvocationCount() > 0 && xTaskGetTickCount() < deadline) {
 				vTaskDelay(pdMS_TO_TICKS(10));
 			}
 		}
@@ -413,19 +408,13 @@ SchedulerResult<uint32_t> ESPScheduler::addJob(
 }
 
 SchedulerResult<uint32_t> ESPScheduler::addJobOnceUtc(
-    const DateTime &whenUtc,
-    const JobOptions &options,
-    SchedulerCallbackFn callback,
-    void *userData
+    const DateTime &whenUtc, const JobOptions &options, SchedulerCallbackFn callback, void *userData
 ) {
 	return addJob(ScheduleSpec::onceUtc(whenUtc), options, callback, userData);
 }
 
 SchedulerResult<uint32_t> ESPScheduler::addJobOnceUtc(
-    const DateTime &whenUtc,
-    const JobOptions &options,
-    SchedulerFunction callback,
-    void *userData
+    const DateTime &whenUtc, const JobOptions &options, SchedulerFunction callback, void *userData
 ) {
 	return addJob(ScheduleSpec::onceUtc(whenUtc), options, std::move(callback), userData);
 }
@@ -442,7 +431,8 @@ SchedulerResult<uint32_t> ESPScheduler::addJobImpl(
 	if (!impl_ || !impl_->started || impl_->draining) {
 		return SchedulerResult<uint32_t>::failure(SchedulerError::NotInitialized);
 	}
-	if (options.dispatch == DispatchPolicy::Async && impl_->executorFor(options.executorId) == nullptr) {
+	if (options.dispatch == DispatchPolicy::Async &&
+	    impl_->executorFor(options.executorId) == nullptr) {
 		return SchedulerResult<uint32_t>::failure(SchedulerError::ExecutorUnavailable);
 	}
 

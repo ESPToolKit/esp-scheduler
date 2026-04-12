@@ -115,7 +115,8 @@ uint32_t ESPSchedulerV1Compat::addJobOnceUtc(
     const SchedulerTaskConfig *taskCfg
 ) {
 	JobOptions options = jobOptionsForMode(mode, taskCfg);
-	SchedulerResult<uint32_t> result = scheduler_.addJobOnceUtc(whenUtc, options, callback, userData);
+	SchedulerResult<uint32_t> result =
+	    scheduler_.addJobOnceUtc(whenUtc, options, callback, userData);
 	trackJob(result.ok() ? result.value : 0);
 	return result.ok() ? result.value : 0;
 }
@@ -168,7 +169,8 @@ uint32_t ESPSchedulerV1Compat::addJob(
     const SchedulerTaskConfig *taskCfg
 ) {
 	JobOptions options = jobOptionsForMode(mode, taskCfg);
-	SchedulerResult<uint32_t> result = scheduler_.addJob(schedule, options, std::move(callback), userData);
+	SchedulerResult<uint32_t> result =
+	    scheduler_.addJob(schedule, options, std::move(callback), userData);
 	trackJob(result.ok() ? result.value : 0);
 	return result.ok() ? result.value : 0;
 }
@@ -235,7 +237,7 @@ bool ESPSchedulerV1Compat::getJobInfo(size_t index, SchedulerV1JobInfo &out) con
 		out.id = info.id;
 		out.enabled = !info.paused;
 		out.mode = info.dispatch == DispatchPolicy::Inline ? SchedulerJobMode::Inline
-		                                                  : SchedulerJobMode::WorkerTask;
+		                                                   : SchedulerJobMode::WorkerTask;
 		out.schedule = info.schedule;
 		out.nextRunUtc = info.nextRunUtc;
 		return true;

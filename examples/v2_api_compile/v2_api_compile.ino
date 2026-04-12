@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <ESPDate.h>
-#include <ESPWorker.h>
 #include <ESPScheduler.h>
+#include <ESPWorker.h>
 
 namespace {
 class CompileOnlyExecutor : public ISchedulerExecutor {
@@ -94,8 +94,8 @@ void setup() {
 
 	JobOptions customExecutorOptions{};
 	customExecutorOptions.dispatch = DispatchPolicy::Async;
-	customExecutorOptions.executorId = compileExecutorId.ok() ? compileExecutorId.value
-	                                                         : scheduler.defaultESPWorkerExecutor();
+	customExecutorOptions.executorId =
+	    compileExecutorId.ok() ? compileExecutorId.value : scheduler.defaultESPWorkerExecutor();
 	(void)scheduler.addJob(
 	    Schedule::custom(
 	        ScheduleField::only(0),

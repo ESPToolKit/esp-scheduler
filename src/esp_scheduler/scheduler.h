@@ -123,9 +123,7 @@ class ESPScheduler {
 	struct Impl;
 
 	SchedulerResult<uint32_t> addJobImpl(
-	    const ScheduleSpec &schedule,
-	    const JobOptions &options,
-	    const CallbackRef &callback
+	    const ScheduleSpec &schedule, const JobOptions &options, const CallbackRef &callback
 	);
 
 	std::unique_ptr<Impl> impl_;

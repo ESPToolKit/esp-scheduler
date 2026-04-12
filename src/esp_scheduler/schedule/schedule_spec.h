@@ -49,9 +49,7 @@ struct ScheduleSpec {
 	static ScheduleSpec sunset(int offsetMinutes = 0);
 	static ScheduleSpec moonPhaseAngle(int angleDegrees, int toleranceDegrees = 1);
 	static ScheduleSpec moonPhase(MoonPhaseName name, int toleranceDegrees = 1);
-	static ScheduleSpec moonIlluminationPercent(
-	    double percent, double tolerancePercent = 0.5
-	);
+	static ScheduleSpec moonIlluminationPercent(double percent, double tolerancePercent = 0.5);
 	static ScheduleSpec custom(
 	    const ScheduleField &minute,
 	    const ScheduleField &hour,

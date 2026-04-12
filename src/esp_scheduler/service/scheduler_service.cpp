@@ -47,11 +47,8 @@ SchedulerService::SchedulerService(
     std::atomic<bool> &timeContextRefreshRequested,
     IExecutorResolver &executors
 )
-    : date_(date),
-      config_(config),
-      core_(date, minValidEpochSeconds, usePSRAMMetadata),
-      timeContextRefreshRequested_(timeContextRefreshRequested),
-      executors_(executors) {
+    : date_(date), config_(config), core_(date, minValidEpochSeconds, usePSRAMMetadata),
+      timeContextRefreshRequested_(timeContextRefreshRequested), executors_(executors) {
 }
 
 SchedulerService::~SchedulerService() {
@@ -137,7 +134,8 @@ void SchedulerService::stop() {
 				continue;
 			}
 			// Producer owns the command until send() succeeds, then may free it only after wait()
-			// completes. The service may free only abandoned commands, and must decide before signal().
+			// completes. The service may free only abandoned commands, and must decide before
+			// signal().
 			const bool shouldDelete = pending->abandoned();
 			pending->signal();
 			if (shouldDelete) {

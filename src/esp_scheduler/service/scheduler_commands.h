@@ -33,9 +33,8 @@ class AddJobCommand : public SchedulerServiceCommand {
 	JobOptions options{};
 	DedicatedTaskOptions dedicatedTaskCopy{};
 	CallbackRef callback{};
-	SchedulerResult<uint32_t> result = SchedulerResult<uint32_t>::failure(
-	    SchedulerError::NotInitialized
-	);
+	SchedulerResult<uint32_t> result =
+	    SchedulerResult<uint32_t>::failure(SchedulerError::NotInitialized);
 
 	void execute(SchedulerCore &core, ESPDate &date, IExecutorResolver &executors) override;
 };
@@ -80,9 +79,8 @@ class RefreshAllSchedulesCommand : public SchedulerServiceCommand {
 
 class JobCountCommand : public SchedulerServiceCommand {
   public:
-	SchedulerResult<size_t> result = SchedulerResult<size_t>::failure(
-	    SchedulerError::NotInitialized
-	);
+	SchedulerResult<size_t> result =
+	    SchedulerResult<size_t>::failure(SchedulerError::NotInitialized);
 
 	void execute(SchedulerCore &core, ESPDate &date, IExecutorResolver &executors) override;
 };

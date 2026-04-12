@@ -21,9 +21,7 @@ template <typename T> class SchedulerArray {
 	SchedulerArray &operator=(const SchedulerArray &) = delete;
 
 	SchedulerArray(SchedulerArray &&other) noexcept
-	    : data_(other.data_),
-	      size_(other.size_),
-	      capacity_(other.capacity_),
+	    : data_(other.data_), size_(other.size_), capacity_(other.capacity_),
 	      usePSRAM_(other.usePSRAM_) {
 		other.data_ = nullptr;
 		other.size_ = 0;
@@ -321,11 +319,8 @@ class SchedulerIdIndex {
 	SchedulerIdIndex &operator=(const SchedulerIdIndex &) = delete;
 
 	SchedulerIdIndex(SchedulerIdIndex &&other) noexcept
-	    : entries_(other.entries_),
-	      capacity_(other.capacity_),
-	      size_(other.size_),
-	      deletedCount_(other.deletedCount_),
-	      usePSRAM_(other.usePSRAM_) {
+	    : entries_(other.entries_), capacity_(other.capacity_), size_(other.size_),
+	      deletedCount_(other.deletedCount_), usePSRAM_(other.usePSRAM_) {
 		other.entries_ = nullptr;
 		other.capacity_ = 0;
 		other.size_ = 0;
@@ -444,7 +439,8 @@ class SchedulerIdIndex {
 
 		for (std::size_t index = 0; index < previousCapacity; ++index) {
 			const Entry &entry = previous[index];
-			if (entry.state == EntryState::Occupied && !insertOrAssign(entry.jobId, entry.slotIndex)) {
+			if (entry.state == EntryState::Occupied &&
+			    !insertOrAssign(entry.jobId, entry.slotIndex)) {
 				schedulerDeallocate(next);
 				entries_ = previous;
 				capacity_ = previousCapacity;

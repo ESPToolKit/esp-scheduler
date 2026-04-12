@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <ESPDate.h>
-#include <ESPWorker.h>
 #include <ESPScheduler.h>
+#include <ESPWorker.h>
 #include <cmath>
 #include <cstdlib>
 #include <memory>
@@ -10,8 +10,8 @@
 #include <unity.h>
 
 #include "esp_scheduler/executors/scheduler_executor.h"
-#include "esp_scheduler/service/scheduler_service.h"
 #include "esp_scheduler/service/scheduler_events.h"
+#include "esp_scheduler/service/scheduler_service.h"
 
 ESPDate date;
 
@@ -213,7 +213,8 @@ static void test_astronomical_job_primes_next_run_immediately() {
 static void test_tick_waits_until_clock_valid_and_primes_once() {
 	JobOptions options{};
 	SchedulerResult<uint32_t> added =
-	    scheduler.addJobOnceUtc(date.fromUtc(2025, 1, 1, 6, 0, 0), options, &inlineCallback, nullptr);
+	    scheduler
+	        .addJobOnceUtc(date.fromUtc(2025, 1, 1, 6, 0, 0), options, &inlineCallback, nullptr);
 	TEST_ASSERT_TRUE(added.ok());
 
 	scheduler.tick(date.fromUtc(1970, 1, 1, 0, 0, 0));
@@ -435,9 +436,11 @@ static void test_ntp_listener_refreshes_on_next_tick() {
 static void test_moon_phase_name_last_quarter_next_occurrence() {
 	DateTime from = date.fromUtc(2024, 3, 25, 0, 0, 0);
 	DateTime next{};
-	TEST_ASSERT_TRUE(
-	    scheduler.computeNextOccurrence(Schedule::moonPhase(MoonPhaseName::LastQuarter, 2), from, next)
-	);
+	TEST_ASSERT_TRUE(scheduler.computeNextOccurrence(
+	    Schedule::moonPhase(MoonPhaseName::LastQuarter, 2),
+	    from,
+	    next
+	));
 	TEST_ASSERT_TRUE(date.differenceInDays(next, from) <= 40);
 
 	MoonPhaseResult phaseAtNext = date.moonPhase(next);
@@ -473,12 +476,8 @@ static void test_invalid_astronomical_schedule_validation() {
 	    scheduler.addJob(Schedule::moonPhaseAngle(360, 1), options, &inlineCallback, nullptr).ok()
 	);
 	TEST_ASSERT_FALSE(
-	    scheduler.addJob(
-	                 Schedule::moonIlluminationPercent(50.0, 0.0),
-	                 options,
-	                 &inlineCallback,
-	                 nullptr
-	             )
+	    scheduler
+	        .addJob(Schedule::moonIlluminationPercent(50.0, 0.0), options, &inlineCallback, nullptr)
 	        .ok()
 	);
 }
@@ -604,12 +603,9 @@ static void test_background_async_runs_without_tick() {
 
 	JobOptions asyncOptions{};
 	asyncOptions.dispatch = DispatchPolicy::Async;
-	SchedulerResult<uint32_t> added = background.addJobOnceUtc(
-	    date.addSeconds(date.now(), 1),
-	    asyncOptions,
-	    &asyncCallback,
-	    nullptr
-	);
+	SchedulerResult<uint32_t> added =
+	    background
+	        .addJobOnceUtc(date.addSeconds(date.now(), 1), asyncOptions, &asyncCallback, nullptr);
 	TEST_ASSERT_TRUE(added.ok());
 
 	const uint32_t startedMs = millis();
@@ -630,12 +626,9 @@ static void test_background_multiple_add_job_commands_do_not_corrupt_command_lif
 	JobOptions options{};
 	SchedulerResult<uint32_t> recurring =
 	    background.addJob(Schedule::dailyAtLocal(6, 0), options, &inlineCallback, nullptr);
-	SchedulerResult<uint32_t> oneShot = background.addJobOnceUtc(
-	    date.addSeconds(date.now(), 60),
-	    options,
-	    &inlineCallback,
-	    nullptr
-	);
+	SchedulerResult<uint32_t> oneShot =
+	    background
+	        .addJobOnceUtc(date.addSeconds(date.now(), 60), options, &inlineCallback, nullptr);
 
 	TEST_ASSERT_TRUE(recurring.ok());
 	TEST_ASSERT_TRUE(oneShot.ok());
@@ -737,7 +730,8 @@ static void test_builtin_espworker_executor_id_available_when_configured() {
 
 static void test_v1_compat_cleanup_prunes_canceled_jobs() {
 	ESPSchedulerV1Compat compat(date);
-	uint32_t jobId = compat.addJob(Schedule::dailyAtLocal(6, 0), SchedulerJobMode::Inline, &inlineCallback);
+	uint32_t jobId =
+	    compat.addJob(Schedule::dailyAtLocal(6, 0), SchedulerJobMode::Inline, &inlineCallback);
 	TEST_ASSERT_TRUE(jobId != 0);
 
 	SchedulerV1JobInfo info{};

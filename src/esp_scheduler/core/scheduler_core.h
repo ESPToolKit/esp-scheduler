@@ -29,9 +29,8 @@ class SchedulerCore {
 	SchedulerResult<void> getJobInfo(uint32_t jobId, JobInfo &out) const;
 
 	void dispatchDue(const DateTime &nowUtc, IExecutorResolver &executors);
-	void handleEvent(
-	    const SchedulerEvent &event, const DateTime &nowUtc, IExecutorResolver &executors
-	);
+	void
+	handleEvent(const SchedulerEvent &event, const DateTime &nowUtc, IExecutorResolver &executors);
 
 	bool nextDueEpoch(int64_t &outEpochSeconds);
 	size_t activeInvocationCount() const;
@@ -53,9 +52,7 @@ class SchedulerCore {
 	void dispatchOne(
 	    size_t slotIndex, const DateTime &nowUtc, IExecutorResolver &executors, bool deferred
 	);
-	void handleCompletion(
-	    size_t slotIndex, const DateTime &nowUtc, IExecutorResolver &executors
-	);
+	void handleCompletion(size_t slotIndex, const DateTime &nowUtc, IExecutorResolver &executors);
 
 	ESPDate &date_;
 	int64_t minValidEpochSeconds_ = 0;
