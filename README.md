@@ -1,3 +1,10 @@
+> [!WARNING]
+> This repository is deprecated and no longer maintained.
+>
+> Development continues in the completely reworked repository:
+> **[ZekStack/Tempo](https://github.com/ZekStack/tempo)**
+>
+
 # ESPScheduler
 
 ESPScheduler v2 is a C++17 scheduler for ESP32 firmware that keeps the cron-style DSL from v1, but replaces the old task-per-job async model with one central scheduler core, one optional background service task, and pluggable executors.
